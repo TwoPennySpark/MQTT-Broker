@@ -1,11 +1,11 @@
-﻿#ifndef MQTT_H
+#ifndef MQTT_H
 #define MQTT_H
 
 #include <memory>
 #include "pack.h"
 
-#define MQTT_HEADER_LEN_MIN 2
-#define MQTT_HEADER_LEN_MAX 5
+#define MQTT_HEADER_LEN_MIN 2 // header(1 byte) + min possible len of Remaining Length field(1 byte)
+#define MQTT_HEADER_LEN_MAX 5 // header(1 byte) + max possible len of Remaining Length field(4 byte)
 #define MQTT_ACK_LEN    4
 
 /*
@@ -37,22 +37,25 @@ enum packet_type {
     UNSUBACK    = 11,
     PINGREQ     = 12,
     PINGRESP    = 13,
-    DISCONNECT  = 14,
-    PKT_TYPE_MAX= 15
+    DISCONNECT  = 14
 };
 
 enum qos_level { AT_MOST_ONCE, AT_LEAST_ONCE, EXACTLY_ONCE };
 
 union mqtt_header {
     mqtt_header() = default;
-    mqtt_header(uint8_t _byte): byte(_byte){}
+    mqtt_header(uint8_t _retain, uint8_t _qos, uint8_t _dup, uint8_t _type): bits(_retain, _qos, _dup, _type){}
+    mqtt_header(uint8_t _byte): byte(_byte) {}
     uint8_t byte;
-    struct {
+    struct hdr {
+        hdr() = default;
+        hdr(uint8_t _retain, uint8_t _qos, uint8_t _dup, uint8_t _type): retain(_retain), qos(_qos), dup(_dup), type(_type){}
         uint8_t retain : 1;
         uint8_t qos : 2;
         uint8_t dup : 1;
         uint8_t type : 4;
-    } bits;
+    };
+    hdr bits;
 };
 
 struct mqtt_packet {
@@ -88,8 +91,9 @@ struct mqtt_connect: public mqtt_packet {
 
 struct mqtt_connack: public mqtt_packet {
     mqtt_connack() = default;
-    mqtt_connack(uint8_t _hdr, uint8_t _session, uint8_t _rc): mqtt_packet (_hdr), sn(_session), rc(_rc){}
+    mqtt_connack(uint8_t _hdr, uint8_t _session, uint8_t _rc): mqtt_packet (_hdr), sp(_session), rc(_rc){}
     union session{
+        session() = default;
         session(uint8_t _byte): byte(_byte){}
         uint8_t byte;
         struct {
@@ -97,7 +101,7 @@ struct mqtt_connack: public mqtt_packet {
             uint8_t reserved : 7;
         } bits;
     };
-    session sn;
+    session sp;
     uint8_t rc;
 };
 
@@ -147,6 +151,7 @@ struct mqtt_publish: public mqtt_packet {
 };
 
 struct mqtt_ack: public mqtt_packet {
+    mqtt_ack() = default;
     mqtt_ack(uint8_t _hdr, uint16_t _pkt_id): mqtt_packet(_hdr), pkt_id(_pkt_id){}
     uint16_t pkt_id;
 };
@@ -180,42 +185,32 @@ std::shared_ptr<T> mqtt_packet_create(uint8_t hdr, Args... args)
 uint8_t mqtt_encode_length(std::vector<uint8_t>& buf, uint32_t& iterator, size_t len);
 uint64_t mqtt_decode_length(const std::vector<uint8_t>& buf, uint32_t& iterator);
 uint64_t unpack_mqtt_packet(const std::vector<uint8_t>& buf, mqtt_packet& pkt);
-unsigned char *pack_mqtt_packet(const mqtt_packet *, unsigned);
+std::shared_ptr<std::vector<uint8_t> > pack_mqtt_packet(const mqtt_packet& pkt);
 
-std::shared_ptr<union mqtt_header> mqtt_packet_header(uint8_t byte);
-std::shared_ptr<struct mqtt_ack>mqtt_packet_ack(unsigned char , unsigned short);
-std::shared_ptr<struct mqtt_connack> mqtt_packet_connack(unsigned char ,
-                                         unsigned char ,
-                                         unsigned char);
-std::shared_ptr<struct mqtt_suback> mqtt_packet_suback(unsigned char, unsigned short,
-                                       unsigned char *, unsigned short);
-std::shared_ptr<struct mqtt_publish> mqtt_packet_publish(unsigned char, unsigned short, size_t,
-                                         unsigned char *,
-                                         size_t, unsigned char *);
-//void mqtt_packet_release(union mqtt_packet *, unsigned);
-
-static uint64_t unpack_mqtt_connect(const std::vector<uint8_t>& buf,
+uint64_t unpack_mqtt_connect(const std::vector<uint8_t>& buf,
                                     uint32_t &iterator,
                                     mqtt_packet &packet);
-static uint64_t unpack_mqtt_publish(const std::vector<uint8_t>&buf,
+uint64_t unpack_mqtt_publish(const std::vector<uint8_t>&buf,
                              uint32_t& iterator,
                              mqtt_packet& packet);
-static uint64_t unpack_mqtt_subscribe(const std::vector<uint8_t>& buf,
+uint64_t unpack_mqtt_subscribe(const std::vector<uint8_t>& buf,
                                uint32_t& iterator,
                                mqtt_packet& packet);
-static uint64_t unpack_mqtt_unsubscribe(const std::vector<uint8_t>& buf,
+uint64_t unpack_mqtt_unsubscribe(const std::vector<uint8_t>& buf,
                                  uint32_t& iterator,
                                  mqtt_packet& packet);
-static uint64_t unpack_mqtt_suback(const std::vector<uint8_t>& buf,
+uint64_t unpack_mqtt_suback(const std::vector<uint8_t>& buf,
                             uint32_t& iterator,
                             mqtt_packet& packet);
-static uint64_t unpack_mqtt_ack(const std::vector<uint8_t>& buf,
+uint64_t unpack_mqtt_ack(const std::vector<uint8_t>& buf,
                                 uint32_t& iterator,
                                 mqtt_packet& packet);
-//static unsigned char *pack_mqtt_header(const union mqtt_header *);
-//static unsigned char *pack_mqtt_ack(const union mqtt_packet *);
-//static unsigned char *pack_mqtt_connack(const union mqtt_packet *);
-//static unsigned char *pack_mqtt_suback(const union mqtt_packet *);
-//static unsigned char *pack_mqtt_publish(const union mqtt_packet *);
+
+
+std::shared_ptr<std::vector<uint8_t>> pack_mqtt_header(const union mqtt_header&);
+std::shared_ptr<std::vector<uint8_t>> pack_mqtt_ack(const mqtt_packet&);
+std::shared_ptr<std::vector<uint8_t>> pack_mqtt_connack(const mqtt_packet&);
+std::shared_ptr<std::vector<uint8_t>> pack_mqtt_suback(const mqtt_packet&);
+std::shared_ptr<std::vector<uint8_t>> pack_mqtt_publish(const mqtt_packet&);
 
 #endif

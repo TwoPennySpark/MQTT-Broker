@@ -35,35 +35,7 @@ uint64_t mqtt_decode_length(const std::vector<uint8_t>& buf, uint32_t& iterator)
     return len;
 }
 
-std::shared_ptr<mqtt_header> mqtt_packet_header(uint8_t hdr)
-{
-    return std::shared_ptr<mqtt_header>(new mqtt_header(hdr));
-}
-
-std::shared_ptr<mqtt_ack> mqtt_packet_ack(uint8_t hdr, uint16_t pkt_id)
-{
-    return std::shared_ptr<mqtt_ack>(new mqtt_ack(hdr, pkt_id));
-}
-
-std::shared_ptr<mqtt_connack> mqtt_packet_connack(uint8_t hdr, uint8_t sn, uint8_t rc)
-{
-    return std::shared_ptr<mqtt_connack>(new mqtt_connack(hdr, sn, rc));
-}
-
-std::shared_ptr<mqtt_suback> mqtt_packet_suback(uint8_t hdr, uint16_t pkt_id,
-                                                uint16_t rcs_len, std::vector<uint8_t>& rcs)
-{
-    return std::shared_ptr<mqtt_suback>(new mqtt_suback(hdr, pkt_id, rcs_len, rcs));
-}
-
-std::shared_ptr<mqtt_publish> mqtt_packet_publish(uint8_t hdr, uint16_t pkt_id, uint16_t topiclen,
-                                                  std::string topic, uint16_t payload_len, std::string payload)
-{
-    return std::shared_ptr<mqtt_publish>(new mqtt_publish(hdr, pkt_id, topiclen,
-                                                          topic, payload_len, payload));
-}
-
-static std::shared_ptr<std::vector<uint8_t>> pack_mqtt_header(const union mqtt_header& hdr)
+std::shared_ptr<std::vector<uint8_t>> pack_mqtt_header(const union mqtt_header& hdr)
 {
     uint32_t iterator = 0;
     std::shared_ptr<std::vector<uint8_t>> ret(new std::vector<uint8_t>(MQTT_HEADER_LEN_MIN));
@@ -74,12 +46,12 @@ static std::shared_ptr<std::vector<uint8_t>> pack_mqtt_header(const union mqtt_h
     return ret;
 }
 
-static std::shared_ptr<std::vector<uint8_t>> pack_mqtt_ack(const mqtt_packet& pkt)
+std::shared_ptr<std::vector<uint8_t>> pack_mqtt_ack(const mqtt_packet& pkt)
 {
     uint32_t iterator = 0;
     const mqtt_ack* ptr = dynamic_cast<const mqtt_ack*>(&pkt);
     std::shared_ptr<std::vector<uint8_t>> ret(new std::vector<uint8_t>(
-                                                  MQTT_HEADER_LEN_MIN + sizeof(*ptr)));
+                                                  MQTT_HEADER_LEN_MIN + sizeof(ptr->pkt_id)));
 
     pack(*ret, iterator, pkt.header.byte);
     mqtt_encode_length(*ret, iterator, sizeof(ptr->pkt_id));
@@ -88,22 +60,22 @@ static std::shared_ptr<std::vector<uint8_t>> pack_mqtt_ack(const mqtt_packet& pk
     return ret;
 }
 
-static std::shared_ptr<std::vector<uint8_t>> pack_mqtt_connack(const mqtt_packet& pkt)
+std::shared_ptr<std::vector<uint8_t>> pack_mqtt_connack(const mqtt_packet& pkt)
 {
     uint32_t iterator = 0;
     const mqtt_connack* ptr = dynamic_cast<const mqtt_connack*>(&pkt);
-    std::shared_ptr<std::vector<uint8_t>> ret(new std::vector<uint8_t>(
-                                                  MQTT_HEADER_LEN_MIN + sizeof(*ptr)));
+    std::shared_ptr<std::vector<uint8_t>> ret(new std::vector<uint8_t>(MQTT_HEADER_LEN_MIN +
+                                                                       sizeof(ptr->sp.byte) + sizeof(ptr->rc)));
 
     pack(*ret, iterator, pkt.header.byte);
-    mqtt_encode_length(*ret, iterator, sizeof(ptr->sn)+sizeof(ptr->sn));
-    pack(*ret, iterator, ptr->sn.byte);
+    mqtt_encode_length(*ret, iterator, sizeof(ptr->sp)+sizeof(ptr->sp));
+    pack(*ret, iterator, ptr->sp.byte);
     pack(*ret, iterator, ptr->rc);
 
     return ret;
 }
 
-static std::shared_ptr<std::vector<uint8_t>> pack_mqtt_suback(const mqtt_packet& pkt)
+std::shared_ptr<std::vector<uint8_t>> pack_mqtt_suback(const mqtt_packet& pkt)
 {
     uint32_t iterator = 0;
     const mqtt_suback* ptr = dynamic_cast<const mqtt_suback*>(&pkt);
@@ -116,17 +88,63 @@ static std::shared_ptr<std::vector<uint8_t>> pack_mqtt_suback(const mqtt_packet&
 
     (*ret).resize(sizeof(pkt.header.byte) + remainingLenSize + remainingLen);
 
+    pack(*ret, iterator, ptr->pkt_id);
     pack(*ret, iterator, ptr->rcs);
 
     return ret;
 }
 
-//static unsigned char *pack_mqtt_publish(const union mqtt_packet *);
-
-
-unsigned char *pack_mqtt_packet(const mqtt_packet *, unsigned)
+std::shared_ptr<std::vector<uint8_t>> pack_mqtt_publish(const mqtt_packet& pkt)
 {
+    uint32_t iterator = 0;
+    const mqtt_publish* ptr = dynamic_cast<const mqtt_publish*>(&pkt);
 
+    std::shared_ptr<std::vector<uint8_t>> ret(new std::vector<uint8_t>(MQTT_HEADER_LEN_MAX));
+
+    pack(*ret, iterator, pkt.header.byte);
+    uint32_t remainingLen = sizeof(ptr->topiclen) +
+                            ptr->topiclen + ptr->payloadlen;
+    if (pkt.header.bits.qos > AT_MOST_ONCE)
+        remainingLen += sizeof(ptr->pkt_id);
+    uint8_t remainingLenSize = mqtt_encode_length(*ret, iterator, remainingLen);
+
+    (*ret).resize(sizeof(pkt.header.byte) + remainingLenSize + remainingLen);
+
+    pack(*ret, iterator, ptr->topiclen);
+    pack(*ret, iterator, ptr->topic);
+    if (pkt.header.bits.qos > AT_MOST_ONCE)
+        pack(*ret, iterator, ptr->pkt_id);
+    pack(*ret, iterator, ptr->payload);
+
+    return ret;
+}
+
+typedef std::shared_ptr<std::vector<uint8_t>> mqtt_pack_handler(const mqtt_packet& pkt);
+static std::vector<mqtt_pack_handler*> mqtt_pack_handlers =
+{
+    nullptr,
+    nullptr,
+    pack_mqtt_connack,
+    pack_mqtt_publish,
+    pack_mqtt_ack,
+    pack_mqtt_ack,
+    pack_mqtt_ack,
+    pack_mqtt_ack,
+    nullptr,
+    pack_mqtt_suback,
+    nullptr,
+    pack_mqtt_ack,
+    nullptr,
+    nullptr,
+    nullptr
+};
+
+std::shared_ptr<std::vector<uint8_t>> pack_mqtt_packet(const mqtt_packet& pkt)
+{
+    if (pkt.header.bits.type == PINGREQ || pkt.header.bits.type == PINGRESP)
+        return pack_mqtt_header(pkt.header);
+
+    return mqtt_pack_handlers[pkt.header.bits.type](pkt);
 }
 
 uint64_t unpack_mqtt_ack(const std::vector<uint8_t>& buf, uint32_t& iterator, mqtt_packet& packet)
@@ -298,7 +316,7 @@ static std::vector<mqtt_unpack_handler*> mqtt_unpack_handlers =
 {
     nullptr,
     unpack_mqtt_connect,
-    unpack_mqtt_ack,
+    nullptr,
     unpack_mqtt_publish,
     unpack_mqtt_ack,
     unpack_mqtt_ack,
@@ -310,9 +328,26 @@ static std::vector<mqtt_unpack_handler*> mqtt_unpack_handlers =
     unpack_mqtt_ack,
     nullptr,
     nullptr,
-    nullptr,
     nullptr
 };
+
+//{
+//    nullptr,
+//    nullptr,
+//    pack_mqtt_connack,
+//    pack_mqtt_publish,
+//    pack_mqtt_ack,
+//    pack_mqtt_ack,
+//    pack_mqtt_ack,
+//    pack_mqtt_ack,
+//    nullptr,
+//    pack_mqtt_suback,
+//    nullptr,
+//    pack_mqtt_ack,
+//    nullptr,
+//    nullptr,
+//    nullptr
+//};
 
 uint64_t unpack_mqtt_packet(const std::vector<uint8_t>& buf, mqtt_packet& pkt)
 {
@@ -320,10 +355,10 @@ uint64_t unpack_mqtt_packet(const std::vector<uint8_t>& buf, mqtt_packet& pkt)
     uint32_t iterator = 0;
     unpack(buf, iterator, pkt.header.byte);
 
-    if (!(pkt.header.bits.type == DISCONNECT
-        || pkt.header.bits.type == PINGREQ
-        || pkt.header.bits.type == PINGRESP))
-        rc = mqtt_unpack_handlers[pkt.header.byte](buf, iterator, pkt);
+    if (pkt.header.bits.type != DISCONNECT
+        && pkt.header.bits.type != PINGREQ
+        && pkt.header.bits.type != PINGRESP)
+        rc = mqtt_unpack_handlers[pkt.header.bits.type](buf, iterator, pkt);
     return rc;
 }
 

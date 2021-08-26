@@ -5,7 +5,7 @@
 
 using namespace std;
 
-void test_pack()
+void test_simple_pack_unpack()
 {
     std::vector<uint8_t> buf(64);
     uint32_t iterator = 0;
@@ -66,41 +66,43 @@ void test_pack()
     PRINT_N_CLEAR(buf);
 
     // UNPACK
-    iterator--;
+//    iterator--;
+    iterator = 0;
 
-    for (int i = u32s.size()-1; i >= 0; i--)
+//    for (int i = u8s.size()-1; i >= 0; i--)
+    for (int i = 0; i < u8s.size(); i++)
     {
-        uint32_t elem = 0;
+        uint8_t elem = 0;
         unpack(buf, iterator, elem);
-        assert(elem == u32s[i]);
+        assert(elem == u8s[i]);
     }
 
-    for (int i = i16s.size()-1; i >= 0; i--)
-    {
-        int16_t elem = 0;
-        unpack(buf, iterator, elem);
-        assert(elem == i16s[i]);
-    }
-
-    for (int i = u16s.size()-1; i >= 0; i--)
-    {
-        uint16_t elem = 0;
-        unpack(buf, iterator, elem);
-        assert(elem == u16s[i]);
-    }
-
-    for (int i = i8s.size()-1; i >= 0; i--)
+    for (int i = 0; i < i8s.size(); i++)
     {
         int8_t elem = 0;
         unpack(buf, iterator, elem);
         assert(elem == i8s[i]);
     }
 
-    for (int i = u8s.size()-1; i >= 0; i--)
+    for (int i = 0; i < u16s.size(); i++)
     {
-        uint8_t elem = 0;
+        uint16_t elem = 0;
         unpack(buf, iterator, elem);
-        assert(elem == u8s[i]);
+        assert(elem == u16s[i]);
+    }
+
+    for (int i = 0; i < i16s.size(); i++)
+    {
+        int16_t elem = 0;
+        unpack(buf, iterator, elem);
+        assert(elem == i16s[i]);
+    }
+
+    for (int i = 0; i < u32s.size(); i++)
+    {
+        uint32_t elem = 0;
+        unpack(buf, iterator, elem);
+        assert(elem == u32s[i]);
     }
 #undef PRINT_N_CLEAR
 }
@@ -143,13 +145,61 @@ void test_mqtt_encode_length_single_input_multiple_input()
     }
 }
 
+
+void test_pack_unpack()
+{
+    {
+        // PINGREQ
+        mqtt_header hdr(1, AT_MOST_ONCE, 0, PINGREQ);
+        auto pkt0 = mqtt_packet_create<mqtt_packet>(hdr.byte);
+        auto ret = pack_mqtt_packet(*pkt0);
+
+        mqtt_packet pkt1 = {};
+        unpack_mqtt_packet(*ret, pkt1);
+
+        assert(pkt0->header.byte == pkt1.header.byte);
+    }
+
+    {
+        // PINGRESP
+        mqtt_header hdr(0, AT_LEAST_ONCE, 1, PINGRESP);
+        auto pkt0 = mqtt_packet_create<mqtt_packet>(hdr.byte);
+        auto ret = pack_mqtt_packet(*pkt0);
+
+        mqtt_packet pkt1 = {};
+        unpack_mqtt_packet(*ret, pkt1);
+
+        assert(pkt0->header.byte == pkt1.header.byte);
+    }
+
+    {
+        // PUBLISH
+        mqtt_header hdr(1, AT_LEAST_ONCE, 0, PUBLISH);
+        std:: string topic = "topic", msg = "message";
+        auto pkt0 = mqtt_packet_create<mqtt_publish>(hdr.byte, 128,
+                                                     topic.length(), topic,
+                                                     msg.length(), msg);
+        auto ret = pack_mqtt_packet(*pkt0);
+
+        mqtt_publish pkt1 = {};
+        unpack_mqtt_packet(*ret, pkt1);
+
+        assert(pkt0->header.byte == pkt1.header.byte);
+        assert(pkt0->pkt_id == pkt1.pkt_id);
+        assert(pkt0->topiclen == pkt1.topiclen);
+        assert(pkt0->topic == pkt1.topic);
+        assert(pkt0->payloadlen == pkt1.payloadlen);
+        assert(pkt0->payload == pkt1.payload);
+    }
+}
+
 int main()
 {
 
-//    test_pack();
+//    test_simple_pack_unpack();
 //    test_mqtt_encode_length_single_input();
 //    test_mqtt_encode_length_single_input_multiple_input();
-
+    test_pack_unpack();
 
     printf("END\n");
     return 0;

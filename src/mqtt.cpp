@@ -269,7 +269,7 @@ uint64_t unpack_mqtt_connect(const std::vector<uint8_t>& buf, uint32_t& iterator
     uint8_t protocolLevel = 0;
     unpack(buf, iterator, protocolLevel);
 
-    unpack(buf, iterator, pkt->byte);
+    unpack(buf, iterator, pkt->vhdr.byte);
 
     unpack(buf, iterator, pkt->payload.keepalive);
 
@@ -279,7 +279,7 @@ uint64_t unpack_mqtt_connect(const std::vector<uint8_t>& buf, uint32_t& iterator
     pkt->payload.client_id.resize(clientIDLength);
     unpack(buf,iterator, pkt->payload.client_id);
 
-    if (pkt->bits.will)
+    if (pkt->vhdr.bits.will)
     {
         uint16_t willTopicLen = 0;
         unpack(buf, iterator, willTopicLen);
@@ -292,7 +292,7 @@ uint64_t unpack_mqtt_connect(const std::vector<uint8_t>& buf, uint32_t& iterator
         unpack(buf, iterator, pkt->payload.will_message);
     }
 
-    if (pkt->bits.username)
+    if (pkt->vhdr.bits.username)
     {
         uint16_t usernameLen = 0;
         unpack(buf, iterator, usernameLen);
@@ -300,7 +300,7 @@ uint64_t unpack_mqtt_connect(const std::vector<uint8_t>& buf, uint32_t& iterator
         unpack(buf,iterator, pkt->payload.username);
     }
 
-    if (pkt->bits.password)
+    if (pkt->vhdr.bits.password)
     {
         uint16_t passwordLen = 0;
         unpack(buf, iterator, passwordLen);
@@ -315,16 +315,16 @@ typedef uint64_t mqtt_unpack_handler(const std::vector<uint8_t>& buf, uint32_t& 
 static std::vector<mqtt_unpack_handler*> mqtt_unpack_handlers =
 {
     nullptr,
-    unpack_mqtt_connect,
+    unpack_mqtt_connect, //
     nullptr,
     unpack_mqtt_publish,
     unpack_mqtt_ack,
     unpack_mqtt_ack,
     unpack_mqtt_ack,
     unpack_mqtt_ack,
-    unpack_mqtt_subscribe,
+    unpack_mqtt_subscribe, //
     unpack_mqtt_suback,
-    unpack_mqtt_unsubscribe,
+    unpack_mqtt_unsubscribe, //
     unpack_mqtt_ack,
     nullptr,
     nullptr,
@@ -334,7 +334,7 @@ static std::vector<mqtt_unpack_handler*> mqtt_unpack_handlers =
 //{
 //    nullptr,
 //    nullptr,
-//    pack_mqtt_connack,
+//    pack_mqtt_connack, //
 //    pack_mqtt_publish,
 //    pack_mqtt_ack,
 //    pack_mqtt_ack,

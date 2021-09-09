@@ -66,8 +66,17 @@ struct mqtt_packet {
 };
 
 struct mqtt_connect: public mqtt_packet {
-    mqtt_connect() = default;
-    union {
+//    mqtt_connect() = default;
+//    mqtt_connect(uint8_t _hdr, uint8_t _vhdr, uint8_t _keepalive, std::string _client_id, std::string _username,
+//                 std::string _password, std::string _will_topic, std::string _will_message): mqtt_packet(_hdr),
+//                 vhdr(_vhdr), pld(_keepalive, _client_id, _username, _password, _will_topic, _will_message){}
+    union /*variable_header*/{
+//        variable_header() = default;
+//        variable_header(uint8_t _byte): byte(_byte) {}
+//        variable_header(uint8_t _clean_session, uint8_t _will, uint8_t _will_qos,
+//                        uint8_t _will_retain, uint8_t _password, uint8_t _username):
+//                        clean_session(_clean_session), will(_will), will_qos(_will_qos),
+//                        will_retain(_will_retain), password(_password), username(_username) {}
         uint8_t byte;
         struct {
             int8_t reserved : 1;
@@ -78,15 +87,22 @@ struct mqtt_connect: public mqtt_packet {
             uint8_t password : 1;
             uint8_t username : 1;
         } bits;
-    };
-    struct {
+    }vhdr;
+//    variable_header vhdr;
+    struct{
+//        payload() = default;
+//        payload(uint8_t _keepalive, std::string _client_id, std::string _username,
+//                std::string _password, std::string _will_topic, std::string _will_message):
+//            keepalive(_keepalive), client_id(_client_id), username(_username), password(_password),
+//            will_topic(_will_topic), will_message(_will_message){}
         uint16_t keepalive;
         std::string client_id;
         std::string username;
         std::string password;
         std::string will_topic;
         std::string will_message;
-    } payload;
+    }payload;
+//    payload pld;
 };
 
 struct mqtt_connack: public mqtt_packet {

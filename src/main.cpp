@@ -12,9 +12,9 @@ void test_simple_pack_unpack()
 //    uint8_t *iterator = buf.data();
 
 #define PRINT_N_CLEAR(buf) \
-    for (uint i = 0; i < buf.size(); i++) \
-        printf("%x\n", buf[i]); \
     buf.clear();
+//    for (uint i = 0; i < buf.size(); i++) \
+//        printf("%x\n", buf[i]); \
 
     // PACK
     std::vector<uint8_t> u8s = {0, 100, 255};
@@ -127,7 +127,7 @@ void test_mqtt_encode_length_single_input()
     }
 }
 
-void test_mqtt_encode_length_single_input_multiple_input()
+void test_mqtt_encode_length_multiple_input()
 {
     std::vector<uint8_t> buf(pow(2, 28), 0);
     uint32_t iterator = 0;
@@ -144,7 +144,6 @@ void test_mqtt_encode_length_single_input_multiple_input()
         assert(result == len);
     }
 }
-
 
 void test_pack_unpack()
 {
@@ -191,14 +190,43 @@ void test_pack_unpack()
         assert(pkt0->payloadlen == pkt1.payloadlen);
         assert(pkt0->payload == pkt1.payload);
     }
+
+    {
+        // SUBACK
+        mqtt_header hdr(0, EXACTLY_ONCE, 1, SUBACK);
+        std::vector<uint8_t> rcs = {0, 255, 100, 1};
+        auto pkt0 = mqtt_packet_create<mqtt_suback>(hdr.byte, 65535, rcs.size(), rcs);
+        auto ret = pack_mqtt_packet(*pkt0);
+
+        mqtt_suback pkt1 = {};
+        unpack_mqtt_packet(*ret, pkt1);
+
+        assert(pkt0->header.byte == pkt1.header.byte);
+        assert(pkt0->pkt_id == pkt1.pkt_id);
+        assert(pkt0->rcslen == pkt1.rcslen);
+        for (uint i = 0; i < pkt0->rcslen; i++)
+            assert(pkt0->rcs[i] == pkt1.rcs[i]);
+    }
+
+    {
+        // PUBACK(PUBREC, PUBREL, PUBCOMP)
+        mqtt_header hdr(1, AT_MOST_ONCE, 0, PUBACK);
+        auto pkt0 = mqtt_packet_create<mqtt_ack>(hdr.byte, 10);
+        auto ret = pack_mqtt_packet(*pkt0);
+
+        mqtt_ack pkt1 = {};
+        unpack_mqtt_packet(*ret, pkt1);
+
+        assert(pkt0->header.byte == pkt1.header.byte);
+        assert(pkt0->pkt_id == pkt1.pkt_id);
+    }
 }
 
 int main()
 {
-
-//    test_simple_pack_unpack();
+    test_simple_pack_unpack();
 //    test_mqtt_encode_length_single_input();
-//    test_mqtt_encode_length_single_input_multiple_input();
+//    test_mqtt_encode_length_multiple_input();
     test_pack_unpack();
 
     printf("END\n");

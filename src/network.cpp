@@ -16,6 +16,7 @@
 #include <sys/socket.h>
 #include <sys/eventfd.h>
 #include "network.h"
+#include "config.h"
 
 /* Set non-blocking socket */
 int set_nonblocking(int fd)
@@ -101,19 +102,20 @@ int accept_connection(int serversock)
 }
 
 /* Send all bytes contained in buf, updating sent bytes counter */
-ssize_t send_bytes(int fd, const unsigned char *buf, size_t len)
+ssize_t send_bytes(int fd, std::vector<uint8_t>& buf, uint& iter, size_t len)
 {
     size_t total = 0;
     size_t bytesleft = len;
     ssize_t n = 0;
     while (total < len) {
-        n = send(fd, buf + total, bytesleft, MSG_NOSIGNAL);
+        n = send(fd, buf.data()+iter, bytesleft, MSG_NOSIGNAL);
         if (n == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK)
                 break;
             else
                 goto err;
         }
+        iter += n;
         total += n;
         bytesleft -= n;
     }
@@ -127,13 +129,13 @@ err:
  * Receive a given number of bytes on the descriptor fd, storing the stream of
  * data into a 2 Mb capped buffer
  */
-ssize_t recv_bytes(int fd, unsigned char *buf, size_t bufsize)
+ssize_t recv_bytes(int fd, std::vector<uint8_t>& buf, uint& iter, size_t bufsize)
 {
     ssize_t n = 0;
     ssize_t total = 0;
     while (total < (ssize_t) bufsize)
     {
-        if ((n = recv(fd, buf, bufsize - total, 0)) < 0)
+        if ((n = recv(fd, buf.data()+iter, bufsize - total, 0)) < 0)
         {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 break;
@@ -142,7 +144,7 @@ ssize_t recv_bytes(int fd, unsigned char *buf, size_t bufsize)
         }
         if (n == 0)
             return 0;
-        buf += n;
+        iter += n;
         total += n;
     }
     return total;
@@ -277,17 +279,22 @@ int evloop::evloop_wait()
                 {
                     struct closure *c = periodic_tasks[i].closure;
                     (void) read(events[i].data.fd, &timer, 8);
-                    c->call(this, c->args);
+                    c->call(*this, c->args);
                     periodic_done = 1;
                 }
             }
             if (periodic_done == 1)
                 continue;
             /* No error events, proceed to run callback */
-            closure->call(this, closure->args);
+            closure->call(*this, closure->args);
         }
     }
     return rc;
+}
+
+int evloop::get_status()
+{
+    return status;
 }
 
 int evloop::evloop_rearm_callback_read(struct closure *cb)

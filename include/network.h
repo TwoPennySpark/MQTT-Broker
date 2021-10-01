@@ -33,13 +33,13 @@ int accept_connection(int);
  * Send all data in a loop, avoiding interruption based on the kernel buffer
  * availability
  */
-ssize_t send_bytes(int, const unsigned char *, size_t);
+ssize_t send_bytes(int, std::vector<uint8_t> &, uint &iter, size_t);
 
 /*
  * Receive (read) an arbitrary number of bytes from a file descriptor and
  * store them in a buffer
  */
-ssize_t recv_bytes(int, unsigned char *, size_t);
+ssize_t recv_bytes(int, std::vector<uint8_t> &, uint &iter, size_t);
 
 
 /* Event loop wrapper class, define an EPOLL loop and his status. The
@@ -113,9 +113,11 @@ public:
      * file descriptors and executing the paired callback previously registered
      */
     int evloop_wait();
+
+    int get_status();
 };
 
-typedef void callback(evloop *, void *);
+typedef void callback(evloop& , void *);
 
 #define UUID_LEN 16
 /*
@@ -132,7 +134,7 @@ struct closure {
     void *obj;
     void *args;
     char closure_id[UUID_LEN];
-    struct bytestring *payload;
+    std::vector<uint8_t> payload;
     callback *call;
 };
 

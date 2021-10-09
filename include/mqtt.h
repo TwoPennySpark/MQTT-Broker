@@ -65,12 +65,12 @@ union mqtt_header
 {
     mqtt_header() = default;
     mqtt_header(uint8_t _byte): byte(_byte) {}
-//    mqtt_header(uint8_t _retain, uint8_t _qos, uint8_t _dup, uint8_t _type): bits(_retain, _qos, _dup, _type){}
+    mqtt_header(uint8_t _retain, uint8_t _qos, uint8_t _dup, uint8_t _type): bits(_retain, _qos, _dup, _type){}
     uint8_t byte;
     struct hdr
     {
         hdr() = default;
-//        hdr(uint8_t _retain, uint8_t _qos, uint8_t _dup, uint8_t _type): retain(_retain), qos(_qos), dup(_dup), type(_type){}
+        hdr(uint8_t _retain, uint8_t _qos, uint8_t _dup, uint8_t _type): retain(_retain), qos(_qos), dup(_dup), type(_type){}
         uint8_t retain : 1;
         uint8_t qos : 2;
         uint8_t dup : 1;
@@ -91,16 +91,10 @@ struct mqtt_packet
         return std::shared_ptr<T>(new T(hdr, args...));
     }
 
-    // doesnt seem to work?
-//    template <typename... Args>
-//    static mqtt_packet* create(uint8_t id);//, Args... args);
-
-//    static mqtt_packet* create(uint8_t id);
     static std::shared_ptr<mqtt_packet> create(std::vector<uint8_t>& buf);
 
     virtual uint64_t pack(std::vector<uint8_t>&);
-    virtual uint64_t unpack(const std::vector<uint8_t>&);
-//    virtual int32_t handle(struct closure&);
+    virtual uint64_t unpack(const std::vector<uint8_t>& buf, uint& iterator);
 
     virtual ~mqtt_packet() = default;
 };
@@ -146,7 +140,7 @@ struct mqtt_connect: public mqtt_packet
     }/*payload*/;
     payload payload;
 
-    uint64_t unpack(const std::vector<uint8_t>& buf) override;
+    uint64_t unpack(const std::vector<uint8_t>& buf, uint& iterator) override;
 //    virtual int32_t handle(struct closure& cb) override;
 };
 
@@ -184,7 +178,7 @@ struct mqtt_subscribe: public mqtt_packet
     };
     std::vector<tuple> tuples;
 
-    uint64_t unpack(const std::vector<uint8_t>& buf) override;
+    uint64_t unpack(const std::vector<uint8_t>& buf, uint& iterator) override;
 };
 
 struct mqtt_unsubscribe: public mqtt_packet
@@ -199,7 +193,7 @@ struct mqtt_unsubscribe: public mqtt_packet
     };
     std::vector<tuple> tuples;
 
-    uint64_t unpack(const std::vector<uint8_t>& buf) override;
+    uint64_t unpack(const std::vector<uint8_t>& buf, uint& iterator) override;
 };
 
 struct mqtt_suback: public mqtt_packet
@@ -213,7 +207,7 @@ struct mqtt_suback: public mqtt_packet
     std::vector<uint8_t> rcs;
 
     uint64_t pack(std::vector<uint8_t>& buf) override;
-    uint64_t unpack(const std::vector<uint8_t>& buf) override;
+    uint64_t unpack(const std::vector<uint8_t>& buf, uint& iterator) override;
 };
 
 struct mqtt_publish: public mqtt_packet
@@ -230,7 +224,7 @@ struct mqtt_publish: public mqtt_packet
     uint16_t payloadlen;
     std::string payload;
 
-    uint64_t unpack(const std::vector<uint8_t>& buf) override;
+    uint64_t unpack(const std::vector<uint8_t>& buf, uint& iterator) override;
     uint64_t pack(std::vector<uint8_t>& buf) override;
 };
 
@@ -241,7 +235,7 @@ struct mqtt_ack: public mqtt_packet
     mqtt_ack(uint8_t _hdr, uint16_t _pkt_id): mqtt_packet(_hdr), pkt_id(_pkt_id){}
     uint16_t pkt_id;
 
-    uint64_t unpack(const std::vector<uint8_t>& buf) override;
+    uint64_t unpack(const std::vector<uint8_t>& buf, uint& iterator) override;
     uint64_t pack(std::vector<uint8_t>& buf) override;
 };
 

@@ -67,85 +67,6 @@ std::shared_ptr<std::vector<uint8_t>> pack_mqtt_packet(const mqtt_packet& pkt)
 //    return mqtt_pack_handlers[pkt.header.bits.type](pkt);
 }
 
-//int32_t mqtt_connect::handle(closure &cb)
-//{
-//    if (sol.clients.find(payload.client_id) != sol.clients.end())
-//    {
-//        // Already connected client, 2 CONNECT packet should be interpreted as
-//        // a violation of the protocol, causing disconnection of the client
-
-//        sol_info("Received double CONNECT from %s, disconnecting client",
-//                 payload.client_id.data());
-
-//        close(cb.fd);
-//        sol.clients.erase(payload.client_id);
-//        sol.closures.erase(cb.closure_id);
-
-//        // Update stats
-//        info.nclients--;
-//        info.nconnections--;
-
-//        return -REARM_W;
-//    }
-//    sol_info("New client connected as %s (c%i, k%u)",
-//             payload.client_id.data(),
-//             vhdr.bits.clean_session,
-//             payload.keepalive);
-
-//    /*
-//     * Add the new connected client to the global map, if it is already
-//     * connected, kick him out accordingly to the MQTT v3.1.1 specs.
-//     */
-//    std::shared_ptr<struct sol_client> new_client(new sol_client);
-//    new_client->fd = cb.fd;
-//    new_client->client_id = payload.client_id;
-//    sol.clients.insert(std::make_pair(new_client->client_id, *new_client));
-
-//    /* Substitute fd on callback with closure */
-//    cb.obj = new_client.get();
-
-//    /* Respond with a connack */
-////    mqtt_packet *response = malloc(sizeof(*response));
-////    unsigned char byte = CONNACK_BYTE;
-
-//    // TODO check for session already present
-
-////    if (pkt->connect.bits.clean_session == false)
-////        new_client->session.subscriptions = list_create(NULL);
-
-//    uint8_t session_present = 0;
-//    uint8_t connect_flags = 0 | (session_present & 0x1) << 0;
-//    uint8_t rc = 0;  // 0 means connection accepted
-
-//    if (vhdr.bits.clean_session)
-//    {
-//        session_present = 0;
-//        rc = 0;
-//    }
-//    else
-//    {
-//        // TODO: handle this case
-//    }
-//    mqtt_connack response;
-//    response.sp = session_present;
-//    response.rc = rc;
-
-////    response->connack = *mqtt_packet_connack(byte, connect_flags, rc);
-
-////    cb->payload = bytestring_create(MQTT_ACK_LEN);
-////    cb.payload.resize(MQTT_ACK_LEN);
-
-////    unsigned char *p = pack_mqtt_packet(response, CONNACK);
-//    response.pack(cb.payload);
-////    memcpy(cb.payload.data(), p, MQTT_ACK_LEN);
-////    free(p);
-
-//    sol_debug("Sending CONNACK to %s (%u, %u)", payload.client_id.data(), session_present, rc);
-
-////    free(response);
-
-//    return REARM_W;
-//}
 
 typedef uint64_t mqtt_unpack_handler(const std::vector<uint8_t>& buf, uint32_t& iterator, mqtt_packet& pkt);
 //static std::vector<mqtt_unpack_handler*> mqtt_unpack_handlers =
@@ -198,123 +119,103 @@ uint64_t unpack_mqtt_packet(const std::vector<uint8_t>& buf, mqtt_packet& pkt)
     return rc;
 }
 
-//mqtt_packet* mqtt_packet::create(uint8_t id)
-//{
-//switch (id)
-//{
-//    case CONNECT:
-//        return new mqtt_connect(id);
-//    case CONNACK:
-//        return new mqtt_connack(id);
-//    case SUBSCRIBE:
-//        return new mqtt_subscribe(id);
-//    case UNSUBSCRIBE:
-//        return new mqtt_unsubscribe(id);
-//    case SUBACK:
-//        return new mqtt_suback(id);
-//    case PUBLISH:
-//        return new mqtt_publish(id);
-//    case PUBACK:
-//    case PUBREC:
-//    case PUBREL:
-//    case PUBCOMP:
-//        return new mqtt_ack(id);
-//    case PINGREQ:
-//    case PINGRESP:
-//    case DISCONNECT:
-//        return new mqtt_packet(id);
-//    default:
-//        return nullptr;
-//}
-//}
-
 std::shared_ptr<mqtt_packet> mqtt_packet::create(std::vector<uint8_t> &buf)
 {
-    mqtt_header hdr;
+    mqtt_header hdr = {};
     uint32_t iterator = 0;
+    std::shared_ptr<mqtt_packet> ret;
     ::unpack(buf, iterator, hdr.byte);
 
     uint8_t type = hdr.bits.type;
-//    mqtt_packet *pkt = create(hdr.bits.type);
-
     switch (type)
     {
         case CONNECT:
-            return create<mqtt_connect>(type);
+            ret = create<mqtt_connect>(hdr.byte);
+            break;
         case CONNACK:
-            return create<mqtt_connack>(type);
-//        case SUBSCRIBE:
-//            return new mqtt_subscribe(id);
-//        case UNSUBSCRIBE:
-//            return new mqtt_unsubscribe(id);
-//        case SUBACK:
-//            return new mqtt_suback(id);
-//        case PUBLISH:
-//            return new mqtt_publish(id);
-//        case PUBACK:
-//        case PUBREC:
-//        case PUBREL:
-//        case PUBCOMP:
-//            return new mqtt_ack(id);
-//        case PINGREQ:
-//        case PINGRESP:
-//        case DISCONNECT:
-//            return new mqtt_packet(id);
-        default:
-            return nullptr;
-    }
-}
-
-uint64_t mqtt_packet::unpack(const std::vector<uint8_t> & buf)
-{
-    uint iterator = 0;
-    ::unpack(buf, iterator, header.byte);
-}
-
-void pack_send()
-{
-    uint8_t sp = 0, rc = 0;
-
-    std::shared_ptr<mqtt_packet> pkt(mqtt_packet::create<mqtt_connack>(CONNACK, sp, rc, 1));
-
-    std::vector<uint8_t> buf;
-    pkt->pack(buf);
-
-//    send(buf)
-}
-
-int recv_unpack()
-{
-    std::vector<uint8_t> buf;
-    // recv(buf)
-    std::shared_ptr<mqtt_packet> pkt(mqtt_packet::create(buf));
-
-    switch (pkt->header.bits.type)
-    {
+            ret = create<mqtt_connack>(hdr.byte);
+            break;
         case SUBSCRIBE:
+            ret = create<mqtt_subscribe>(hdr.byte);
+            break;
         case UNSUBSCRIBE:
+            ret = create<mqtt_unsubscribe>(hdr.byte);
+            break;
+        case SUBACK:
+            ret = create<mqtt_suback>(hdr.byte);
+            break;
         case PUBLISH:
+            ret = create<mqtt_publish>(hdr.byte);
+            break;
+        case PUBACK:
         case PUBREC:
         case PUBREL:
         case PUBCOMP:
+            ret = create<mqtt_ack>(hdr.byte);
+            break;
         case PINGREQ:
         case PINGRESP:
         case DISCONNECT:
-            pkt->unpack(buf);
+            ret = create<mqtt_packet>(hdr.byte);
             break;
         default:
-            return -1;
+            return nullptr;
     }
-    mqtt_connack c;
-    c.unpack(buf);
-
-    return 0;
-    // process_pkt(pkt)
+    iterator = 0;
+    ret->unpack(buf, iterator);
+    return ret;
 }
 
-uint64_t mqtt_connect::unpack(const std::vector<uint8_t>& buf)
+uint64_t mqtt_packet::unpack(const std::vector<uint8_t>& buf, uint& iterator)
 {
-    uint32_t iterator = 0;
+    ::unpack(buf, iterator, header.byte);
+
+    return 0;
+}
+
+//void pack_send()
+//{
+//    uint8_t sp = 0, rc = 0;
+
+//    std::shared_ptr<mqtt_packet> pkt(mqtt_packet::create<mqtt_connack>(CONNACK, sp, rc, 1));
+
+//    std::vector<uint8_t> buf;
+//    pkt->pack(buf);
+
+////    send(buf)
+//}
+
+//int recv_unpack()
+//{
+//    std::vector<uint8_t> buf;
+//    // recv(buf)
+//    std::shared_ptr<mqtt_packet> pkt(mqtt_packet::create(buf));
+
+//    switch (pkt->header.bits.type)
+//    {
+//        case SUBSCRIBE:
+//        case UNSUBSCRIBE:
+//        case PUBLISH:
+//        case PUBREC:
+//        case PUBREL:
+//        case PUBCOMP:
+//        case PINGREQ:
+//        case PINGRESP:
+//        case DISCONNECT:
+//            pkt->unpack(buf);
+//            break;
+//        default:
+//            return -1;
+//    }
+//    mqtt_connack c;
+//    c.unpack(buf);
+
+//    return 0;
+//    // process_pkt(pkt)
+//}
+
+uint64_t mqtt_connect::unpack(const std::vector<uint8_t>& buf, uint& iterator)
+{
     ::unpack(buf, iterator, header.byte);
 
     uint64_t len = mqtt_decode_length(buf, iterator);
@@ -371,9 +272,8 @@ uint64_t mqtt_connect::unpack(const std::vector<uint8_t>& buf)
     return len;
 }
 
-uint64_t mqtt_subscribe::unpack(const std::vector<uint8_t> &buf)
+uint64_t mqtt_subscribe::unpack(const std::vector<uint8_t> &buf, uint& iterator)
 {
-    uint32_t iterator = 0;
     ::unpack(buf, iterator, header.byte);
 
     uint64_t len = mqtt_decode_length(buf, iterator);
@@ -402,9 +302,8 @@ uint64_t mqtt_subscribe::unpack(const std::vector<uint8_t> &buf)
     return len;
 }
 
-uint64_t mqtt_unsubscribe::unpack(const std::vector<uint8_t> &buf)
+uint64_t mqtt_unsubscribe::unpack(const std::vector<uint8_t> &buf, uint& iterator)
 {
-    uint32_t iterator = 0;
     ::unpack(buf, iterator, header.byte);
 
     uint64_t len = mqtt_decode_length(buf, iterator);
@@ -431,9 +330,8 @@ uint64_t mqtt_unsubscribe::unpack(const std::vector<uint8_t> &buf)
     return len;
 }
 
-uint64_t mqtt_publish::unpack(const std::vector<uint8_t> &buf)
+uint64_t mqtt_publish::unpack(const std::vector<uint8_t> &buf, uint& iterator)
 {
-    uint32_t iterator = 0;
     ::unpack(buf, iterator, header.byte);
 
     uint64_t len = mqtt_decode_length(buf, iterator);
@@ -459,9 +357,9 @@ uint64_t mqtt_publish::unpack(const std::vector<uint8_t> &buf)
     return len;
 }
 
-uint64_t mqtt_ack::unpack(const std::vector<uint8_t>& buf)
+uint64_t mqtt_ack::unpack(const std::vector<uint8_t>& buf, uint& iterator)
 {
-    uint32_t iterator = 0;
+    ::unpack(buf, iterator, header.byte);
     uint64_t len = mqtt_decode_length(buf, iterator);
 
     ::unpack(buf, iterator, pkt_id);
@@ -469,9 +367,9 @@ uint64_t mqtt_ack::unpack(const std::vector<uint8_t>& buf)
     return len;
 }
 
-uint64_t mqtt_suback::unpack(const std::vector<uint8_t>& buf)
+uint64_t mqtt_suback::unpack(const std::vector<uint8_t>& buf, uint& iterator)
 {
-    uint32_t iterator = 0;
+    ::unpack(buf, iterator, header.byte);
     uint64_t len = mqtt_decode_length(buf, iterator);
 
     ::unpack(buf, iterator, pkt_id);

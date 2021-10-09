@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <vector>
+#include <string>
+#include "util.h"
 
 /* Set non-blocking socket */
 int set_nonblocking(int);
@@ -16,13 +18,13 @@ int set_nonblocking(int);
 int set_tcp_nodelay(int);
 
 /* Auxiliary function for creating epoll server */
-int create_and_bind(const char *, uint16_t);
+int create_and_bind(const std::string &, uint16_t);
 
 /*
  * Create a non-blocking socket and make it listen on the specfied address and
  * port
  */
-int make_listen(const char *, uint16_t);
+int make_listen(const std::string &, uint16_t);
 
 /* Accept a connection and add it to the right epollfd */
 int accept_connection(int);
@@ -119,7 +121,7 @@ public:
 
 typedef void callback(evloop& , void *);
 
-#define UUID_LEN 16
+//#define UUID_LEN 16
 /*
  * Callback object, represents a callback function with an associated
  * descriptor if needed, args is a void pointer which can be a structure
@@ -129,7 +131,8 @@ typedef void callback(evloop& , void *);
  * a callback, ready to be sent through wire and a function pointer to the
  * callback function to execute.
  */
-struct closure {
+struct closure
+{
     int fd;
     void *obj;
     void *args;

@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <math.h>
 #include "mqtt.h"
+#include "server.h"
 
 using namespace std;
 
@@ -66,10 +67,8 @@ void test_simple_pack_unpack()
     PRINT_N_CLEAR(buf);
 
     // UNPACK
-//    iterator--;
     iterator = 0;
 
-//    for (int i = u8s.size()-1; i >= 0; i--)
     for (int i = 0; i < u8s.size(); i++)
     {
         uint8_t elem = 0;
@@ -150,84 +149,93 @@ void test_pack_unpack()
     {
         // PINGREQ
         mqtt_header hdr(1, AT_MOST_ONCE, 0, PINGREQ);
-        auto pkt0 = mqtt_packet_create<mqtt_packet>(hdr.byte);
-        auto ret = pack_mqtt_packet(*pkt0);
+        mqtt_packet pkt0(hdr.byte);
 
-        mqtt_packet pkt1 = {};
-        unpack_mqtt_packet(*ret, pkt1);
+        std::vector<uint8_t> buf;
+        pkt0.pack(buf);
 
-        assert(pkt0->header.byte == pkt1.header.byte);
+        auto pkt1 = mqtt_packet::create(buf);
+        assert(pkt0.header.byte == pkt1->header.byte);
     }
 
     {
         // PINGRESP
         mqtt_header hdr(0, AT_LEAST_ONCE, 1, PINGRESP);
-        auto pkt0 = mqtt_packet_create<mqtt_packet>(hdr.byte);
-        auto ret = pack_mqtt_packet(*pkt0);
+        mqtt_packet pkt0(hdr.byte);
 
-        mqtt_packet pkt1 = {};
-        unpack_mqtt_packet(*ret, pkt1);
+        std::vector<uint8_t> buf;
+        pkt0.pack(buf);
 
-        assert(pkt0->header.byte == pkt1.header.byte);
+        auto pkt1 = mqtt_packet::create(buf);
+        assert(pkt0.header.byte == pkt1->header.byte);
     }
 
     {
         // PUBLISH
         mqtt_header hdr(1, AT_LEAST_ONCE, 0, PUBLISH);
         std:: string topic = "topic", msg = "message";
-        auto pkt0 = mqtt_packet_create<mqtt_publish>(hdr.byte, 128,
-                                                     topic.length(), topic,
-                                                     msg.length(), msg);
-        auto ret = pack_mqtt_packet(*pkt0);
+        mqtt_publish pkt0(hdr.byte, 128, topic.length(), topic, msg.length(), msg);
 
-        mqtt_publish pkt1 = {};
-        unpack_mqtt_packet(*ret, pkt1);
+        std::vector<uint8_t> buf;
+        pkt0.pack(buf);
 
-        assert(pkt0->header.byte == pkt1.header.byte);
-        assert(pkt0->pkt_id == pkt1.pkt_id);
-        assert(pkt0->topiclen == pkt1.topiclen);
-        assert(pkt0->topic == pkt1.topic);
-        assert(pkt0->payloadlen == pkt1.payloadlen);
-        assert(pkt0->payload == pkt1.payload);
+        auto pkt1p = mqtt_packet::create(buf);
+        mqtt_publish* pkt1(dynamic_cast<mqtt_publish*>(pkt1p.get()));
+        assert(pkt0.header.byte == pkt1->header.byte);
+        assert(pkt0.pkt_id == pkt1->pkt_id);
+        assert(pkt0.topiclen == pkt1->topiclen);
+        assert(pkt0.topic == pkt1->topic);
+        assert(pkt0.payloadlen == pkt1->payloadlen);
+        assert(pkt0.payload == pkt1->payload);
     }
 
     {
         // SUBACK
         mqtt_header hdr(0, EXACTLY_ONCE, 1, SUBACK);
         std::vector<uint8_t> rcs = {0, 255, 100, 1};
-        auto pkt0 = mqtt_packet_create<mqtt_suback>(hdr.byte, 65535, rcs.size(), rcs);
-        auto ret = pack_mqtt_packet(*pkt0);
+        mqtt_suback pkt0(hdr.byte, 65535, rcs.size(), rcs);
 
-        mqtt_suback pkt1 = {};
-        unpack_mqtt_packet(*ret, pkt1);
+        std::vector<uint8_t> buf;
+        pkt0.pack(buf);
 
-        assert(pkt0->header.byte == pkt1.header.byte);
-        assert(pkt0->pkt_id == pkt1.pkt_id);
-        assert(pkt0->rcslen == pkt1.rcslen);
-        for (uint i = 0; i < pkt0->rcslen; i++)
-            assert(pkt0->rcs[i] == pkt1.rcs[i]);
+        auto pkt1p = mqtt_packet::create(buf);
+        mqtt_suback* pkt1(dynamic_cast<mqtt_suback*>(pkt1p.get()));
+
+        assert(pkt0.header.byte == pkt1->header.byte);
+        assert(pkt0.pkt_id == pkt1->pkt_id);
+        assert(pkt0.rcslen == pkt1->rcslen);
+        for (uint i = 0; i < pkt0.rcslen; i++)
+            assert(pkt0.rcs[i] == pkt1->rcs[i]);
     }
 
     {
         // PUBACK(PUBREC, PUBREL, PUBCOMP)
         mqtt_header hdr(1, AT_MOST_ONCE, 0, PUBACK);
-        auto pkt0 = mqtt_packet_create<mqtt_ack>(hdr.byte, 10);
-        auto ret = pack_mqtt_packet(*pkt0);
+        mqtt_ack pkt0(hdr.byte, 10);
 
-        mqtt_ack pkt1 = {};
-        unpack_mqtt_packet(*ret, pkt1);
+        std::vector<uint8_t> buf;
+        pkt0.pack(buf);
 
-        assert(pkt0->header.byte == pkt1.header.byte);
-        assert(pkt0->pkt_id == pkt1.pkt_id);
+        auto pkt1p = mqtt_packet::create(buf);
+        mqtt_ack* pkt1(dynamic_cast<mqtt_ack*>(pkt1p.get()));
+
+        assert(pkt0.header.byte == pkt1->header.byte);
+        assert(pkt0.pkt_id == pkt1->pkt_id);
     }
+}
+
+void tests()
+{
+    test_simple_pack_unpack();
+    test_mqtt_encode_length_single_input();
+    test_mqtt_encode_length_multiple_input();
+    test_pack_unpack();
 }
 
 int main()
 {
-    test_simple_pack_unpack();
-//    test_mqtt_encode_length_single_input();
-//    test_mqtt_encode_length_multiple_input();
-    test_pack_unpack();
+//    tests();
+    start_server("127.0.0.1", 12345);
 
     printf("END\n");
     return 0;

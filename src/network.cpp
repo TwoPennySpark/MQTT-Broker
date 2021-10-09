@@ -1,6 +1,6 @@
 #include "network.h"
 
-#define _DEFAULT_SOURCE
+//#define _DEFAULT_SOURCE
 #include <stdlib.h>
 #include <errno.h>
 #include <netdb.h>
@@ -41,12 +41,12 @@ int set_tcp_nodelay(int fd)
     return setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
 }
 
-int create_and_bind(const char *sockpath, uint16_t port)
+int create_and_bind(const std::string& sockpath, uint16_t port)
 {
-    struct sockaddr_in addr;
-    int fd;
+    int fd = 0;
+    struct sockaddr_in addr = {};
 
-    if ((fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
+    if ((fd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
     {
         perror("socket error");
         return -1;
@@ -54,7 +54,8 @@ int create_and_bind(const char *sockpath, uint16_t port)
 
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    if (inet_pton(AF_INET, sockpath, &addr.sin_addr.s_addr) == -1)
+    addr.sin_addr.s_addr = INADDR_ANY;
+    if (inet_pton(AF_INET, sockpath.data(), &addr.sin_addr.s_addr) == -1)
     {
         perror("Invalid addr");
         return -1;
@@ -73,7 +74,7 @@ int create_and_bind(const char *sockpath, uint16_t port)
  * Create a non-blocking socket and make it listen on the specfied address and
  * port
  */
-int make_listen(const char *host, uint16_t port)
+int make_listen(const std::string& host, uint16_t port)
 {
     int sfd;
     if ((sfd = create_and_bind(host, port)) == -1)

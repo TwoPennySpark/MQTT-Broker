@@ -1,6 +1,8 @@
 #ifndef SERVER_H
 #define SERVER_H
 
+#include <string>
+
 /*
  * Epoll default settings for concurrent events monitored and timeout, -1
  * means no timeout at all, blocking undefinitely
@@ -25,24 +27,25 @@
 #define REARM_R             0
 #define REARM_W             1
 
-int start_server(const char *, const char *);
+int start_server(const std::string& addr, uint16_t port);
 
 /* Global informations statistics structure */
-struct sol_info {
+struct sol_info
+{
     /* Number of clients currently connected */
-    int nclients;
+    int32_t nclients;
     /* Total number of clients connected since the start */
-    int nconnections;
+    int32_t nconnections;
     /* Timestamp of the start time */
-    long long start_time;
+    int64_t start_time;
     /* Total number of bytes received */
-    long long bytes_recv;
+    int64_t bytes_recv;
     /* Total number of bytes sent out */
-    long long bytes_sent;
+    int64_t bytes_sent;
     /* Total number of sent messages */
-    long long messages_sent;
+    int64_t messages_sent;
     /* Total number of received messages */
-    long long messages_recv;
+    int64_t messages_recv;
 };
 
 #endif // SERVER_H

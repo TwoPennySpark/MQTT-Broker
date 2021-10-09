@@ -2,8 +2,8 @@
 #define PACK_H
 
 #include <vector>
+#include <string>
 #include <stdint.h>
-#include <iostream>
 
 template <typename T>
 void pack(std::vector<uint8_t>& buf, uint32_t& iterator, const T& val)

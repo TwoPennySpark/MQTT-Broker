@@ -21,10 +21,11 @@ struct trie
 public:
     struct trie_node<T> root;
 
-    void insert(const std::string& prefix, std::shared_ptr<T>& data)
+    void insert(const std::string& prefix, T* data)
     {
-        trie_node<T>* cursor = (&root), *tmp = nullptr;
-        std::shared_ptr<trie_node<T>> cur_node;
+        trie_node<T>* cursor = (&root), *cur_node = nullptr,
+                    *tmp = nullptr;
+//        std::shared_ptr<trie_node<T>> cur_node;
 
         // Iterate through the key char by char
         for (auto key: prefix)
@@ -34,18 +35,19 @@ public:
             // No match, we add a new node
             if (!tmp)
             {
-                cur_node = std::make_shared<trie_node<T>>();
-                cursor->children[key-32] = cur_node;
+//                cur_node = std::make_shared<trie_node<T>>();
+                cur_node = new trie_node<T>;
+                cursor->children[key-32] = std::shared_ptr<trie_node<T>>(cur_node);
                 cursor->children_num++;
             } else
             {
                 // Match found, the child already exists
-                cur_node = cursor->children[key-32];
+                cur_node = cursor->children[key-32].get();
             }
-            cursor = cur_node.get();
+            cursor = cur_node;
         }
 
-        cursor->data = data;
+        cursor->data = std::shared_ptr<T>(data);
     }
 
     trie_node<T>* find(const std::string& prefix)

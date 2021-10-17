@@ -91,6 +91,148 @@ static void on_accept(evloop &, void *);
 static void publish_stats(evloop &, void *);
 
 /*
+ * Statistics topics, published every N seconds defined by configuration
+ * interval
+ */
+#define SYS_TOPICS 14
+
+static std::string sys_topics[SYS_TOPICS] =
+{
+    "$SOL/",
+    "$SOL/broker/",
+    "$SOL/broker/clients/",
+    "$SOL/broker/bytes/",
+    "$SOL/broker/messages/",
+    "$SOL/broker/uptime/",
+    "$SOL/broker/uptime/sol",
+    "$SOL/broker/clients/connected/",
+    "$SOL/broker/clients/disconnected/",
+    "$SOL/broker/bytes/sent/",
+    "$SOL/broker/bytes/received/",
+    "$SOL/broker/messages/sent/",
+    "$SOL/broker/messages/received/",
+    "$SOL/broker/memory/used"
+};
+
+static void run(evloop& loop)
+{
+    if (loop.evloop_wait() < 0) {
+        sol_error("Event loop exited unexpectedly: %s", strerror(loop.get_status()));
+    }
+}
+
+int start_server(const std::string &addr, uint16_t port)
+{
+    config_set_default();
+
+    /* Initialize the sockets, first the server one */
+    struct closure server_closure;
+    server_closure.fd = make_listen(addr, port);
+    server_closure.args = &server_closure;
+    server_closure.call = on_accept;
+    generate_uuid(server_closure.closure_id);
+
+    /* Generate stats topics */
+    for (int i = 0; i < SYS_TOPICS; i++)
+    {
+        struct topic* sys_topic = new struct topic(sys_topics[i]);
+        sol.topics.insert(sys_topics[i], sys_topic);
+    }
+
+    evloop event_loop(EPOLL_MAX_EVENTS, EPOLL_TIMEOUT);
+
+    /* Set socket in EPOLLIN flag mode, ready to read data */
+    event_loop.evloop_add_callback(&server_closure);
+
+    /* Add periodic task for publishing stats on SYS topics */
+    // TODO Implement
+    struct closure sys_closure;
+    sys_closure.fd = 0;
+    sys_closure.args = &sys_closure;
+    sys_closure.call = publish_stats;
+
+    generate_uuid(sys_closure.closure_id);
+
+    /* Schedule as periodic task to be executed every 5 seconds */
+    event_loop.evloop_add_periodic_task(10, 0, &sys_closure);
+    sol_info("Server start");
+    info.start_time = time(nullptr);
+    run(event_loop);
+
+    sol_info("Sol v%s exiting", VERSION);
+    return 0;
+}
+
+static void publish_message(uint16_t pkt_id,
+                            std::string& topic,
+                            std::string& payload)
+{
+    /* Retrieve the Topic structure from the global map, exit if not found */
+    struct topic *t = nullptr;
+    auto tNode = sol.topics.find(topic);
+    if (!(tNode && (t = tNode->data.get())))
+        return;
+
+    /* Build MQTT packet with command PUBLISH */
+    mqtt_publish pkt(PUBLISH_BYTE,
+                                                 pkt_id,
+                                                 topic.size(),
+                                                 topic,
+                                                 payload.size(),
+                                                 payload);
+
+    /* Send payload through TCP to all subscribed clients of the topic */
+    ssize_t sent = 0L;
+    for (auto& sub: t->subscribers)
+    {
+        sol_debug("Sending PUBLISH (d%i, q%u, r%i, m%u, %s, ... (%i bytes))",
+                  pkt.header.bits.dup,
+                  pkt.header.bits.qos,
+                  pkt.header.bits.retain,
+                  pkt.pkt_id,
+                  pkt.topic.data(),
+                  pkt.payloadlen);
+        struct sol_client *sc = sub->client;
+
+        /* Update QoS according to subscriber's one */
+        pkt.header.bits.qos = sub->qos;
+
+        uint iter = 0;
+        std::vector<uint8_t> packed;
+        pkt.pack(packed);
+        if ((sent = send_bytes(sc->fd, packed, iter, packed.size())) < 0)
+            sol_error("Error publishing to %s: %s",
+                      sc->client_id.data(), strerror(errno));
+
+        // Update information stats
+        info.bytes_sent += sent;
+        info.messages_sent++;
+    }
+}
+
+/*
+ * Publish statistics periodic task, it will be called once every N config
+ * defined seconds, it publish some informations on predefined topics
+ */
+static void publish_stats(evloop& loop, void *args)
+{
+    std::string cclients = std::to_string(info.nclients);
+    std::string bsent = std::to_string(info.bytes_sent);
+    std::string msent = std::to_string(info.messages_sent);
+    std::string mrecv = std::to_string(info.messages_recv);
+    long long uptime = time(NULL) - info.start_time;
+    std::string utime = std::to_string(uptime);
+    double sol_uptime = (double)(time(NULL) - info.start_time) / SOL_SECONDS;
+    std::string sutime = std::to_string(sol_uptime);
+
+    publish_message(0, sys_topics[5], utime);
+    publish_message(0, sys_topics[6], sutime);
+    publish_message(0, sys_topics[7], cclients);
+    publish_message(0, sys_topics[9], bsent);
+    publish_message(0, sys_topics[11], msent);
+    publish_message(0, sys_topics[12], mrecv);
+}
+/*
  * Accept a new incoming connection assigning ip address and socket descriptor
  * to the connection structure pointer passed as argument
  */
@@ -163,14 +305,14 @@ static void on_accept(evloop& loop, void *arg)
  *            again for simplicity and convenience of the caller.
  */
 static ssize_t recv_packet(int clientfd, std::vector<uint8_t>& buf,
-                           uint recvIter, uint8_t& command)
+                           uint recvIter)
 {
     ssize_t nbytes = 0;
 
     /* Read the first byte, it should contain the message type code */
     if ((nbytes = recv_bytes(clientfd, buf, recvIter, 1)) <= 0)
         return -ERRCLIENTDC;
-    uint8_t byte = buf[0];
+    uint8_t byte = buf[0] >> 4;
     if (DISCONNECT < byte || CONNECT > byte)
         return -ERRPACKETERR;
 
@@ -187,7 +329,7 @@ static ssize_t recv_packet(int clientfd, std::vector<uint8_t>& buf,
     } while (buf[recvIter-1] & (1 << 7)); // TO DO: add check for remaining len > 4
 
     uint decodeIter = 0;
-    decodeIter += sizeof(command);
+    decodeIter += sizeof(uint8_t);
     uint64_t tlen = mqtt_decode_length(buf, decodeIter);
 
     /*
@@ -203,11 +345,10 @@ static ssize_t recv_packet(int clientfd, std::vector<uint8_t>& buf,
     if ((n = recv_bytes(clientfd, buf, recvIter, tlen)) < 0)
         goto err;
     nbytes += n;
-    command = byte;
 exit:
     return nbytes;
 err:
-    shutdown(clientfd, 0);
+    shutdown(clientfd, SHUT_RDWR);
     close(clientfd);
     return nbytes;
 }
@@ -221,7 +362,6 @@ static void on_read(evloop& loop, void *arg)
     std::vector<uint8_t> buffer(conf->max_request_size);
     uint iter = 0;
     ssize_t bytes = 0;
-    uint8_t command = 0;
     int rc = 0;
     std::shared_ptr<mqtt_packet> pkt;
 
@@ -231,7 +371,7 @@ static void on_read(evloop& loop, void *arg)
      * send the size of the remaining packet as the second byte. By knowing it
      * we know if the packet is ready to be deserialized and used.
      */
-    bytes = recv_packet(cb->fd, buffer, iter, command);
+    bytes = recv_packet(cb->fd, buffer, iter);
 
     /*
      * Looks like we got a client disconnection.
@@ -255,11 +395,15 @@ static void on_read(evloop& loop, void *arg)
      * Unpack received bytes into a mqtt_packet structure and execute the
      * correct handler based on the type of the operation.
      */
-    pkt = mqtt_packet::create(buffer);
+    if (!(pkt = mqtt_packet::create(buffer)))
+        goto errdc;
 
     /* Execute command callback */
+    if (!handlers[pkt->header.bits.type])
+        goto errdc;
     rc = handlers[pkt->header.bits.type](*cb, pkt.get());
-    if (rc == REARM_W) {
+    if (rc == REARM_W)
+    {
         cb->call = on_write;
 
         /*
@@ -267,7 +411,8 @@ static void on_read(evloop& loop, void *arg)
          * EPOLL event for read fds
          */
         loop.evloop_rearm_callback_write(cb);
-    } else if (rc == REARM_R) {
+    } else if (rc == REARM_R)
+    {
         cb->call = on_read;
         loop.evloop_rearm_callback_read(cb);
     }
@@ -276,12 +421,16 @@ exit:
     return;
 errdc:
     sol_error("Dropping client");
-    shutdown(cb->fd, 0);
+    loop.epoll_del(cb->fd);
+    shutdown(cb->fd, SHUT_RDWR);
     close(cb->fd);
-    sol.clients.erase(((struct sol_client *) cb->obj)->client_id);
-    sol.closures.erase(cb->closure_id);
-    info.nclients--;
-    info.nconnections--;
+    if (cb->obj)
+    {
+        sol.clients.erase(((struct sol_client *) cb->obj)->client_id);
+        sol.closures.erase(cb->closure_id);
+        info.nclients--;
+        info.nconnections--;
+    }
     return;
 }
 
@@ -305,149 +454,6 @@ static void on_write(evloop &loop, void *arg)
     loop.evloop_rearm_callback_read(cb);
 }
 
-/*
- * Statistics topics, published every N seconds defined by configuration
- * interval
- */
-#define SYS_TOPICS 14
-
-static std::string sys_topics[SYS_TOPICS] =
-{
-    "$SOL/",
-    "$SOL/broker/",
-    "$SOL/broker/clients/",
-    "$SOL/broker/bytes/",
-    "$SOL/broker/messages/",
-    "$SOL/broker/uptime/",
-    "$SOL/broker/uptime/sol",
-    "$SOL/broker/clients/connected/",
-    "$SOL/broker/clients/disconnected/",
-    "$SOL/broker/bytes/sent/",
-    "$SOL/broker/bytes/received/",
-    "$SOL/broker/messages/sent/",
-    "$SOL/broker/messages/received/",
-    "$SOL/broker/memory/used"
-};
-
-static void run(evloop& loop)
-{
-    if (loop.evloop_wait() < 0) {
-        sol_error("Event loop exited unexpectedly: %s", strerror(loop.get_status()));
-    }
-}
-
-int start_server(const std::string &addr, uint16_t port)
-{
-    config_set_default();
-
-    /* Initialize the sockets, first the server one */
-    struct closure server_closure;
-    server_closure.fd = make_listen(addr, port);
-    server_closure.args = &server_closure;
-    server_closure.call = on_accept;
-    generate_uuid(server_closure.closure_id);
-
-    /* Generate stats topics */
-    for (int i = 0; i < SYS_TOPICS; i++)
-    {
-        std::shared_ptr<topic> sys_topic = std::make_shared<topic>(sys_topics[i]);
-        sol.topics.insert(sys_topics[i], sys_topic);
-    }
-
-    evloop event_loop(EPOLL_MAX_EVENTS, EPOLL_TIMEOUT);
-
-    /* Set socket in EPOLLIN flag mode, ready to read data */
-    event_loop.evloop_add_callback(&server_closure);
-
-    /* Add periodic task for publishing stats on SYS topics */
-    // TODO Implement
-    struct closure sys_closure;
-    sys_closure.fd = 0;
-    sys_closure.args = &sys_closure;
-    sys_closure.call = publish_stats;
-
-    generate_uuid(sys_closure.closure_id);
-
-    /* Schedule as periodic task to be executed every 5 seconds */
-    event_loop.evloop_add_periodic_task(1, 0, &sys_closure);
-    sol_info("Server start");
-    info.start_time = time(nullptr);
-    run(event_loop);
-
-    sol_info("Sol v%s exiting", VERSION);
-    return 0;
-}
-
-static void publish_message(unsigned short pkt_id,
-                            std::string& topic,
-                            std::string& payload)
-{
-    /* Retrieve the Topic structure from the global map, exit if not found */
-    struct topic *t = nullptr;
-    trie_node<struct topic> *tNode = sol.topics.find(topic);
-    if (!(tNode && tNode->data))
-        return;
-    t = tNode->data.get();
-
-    /* Build MQTT packet with command PUBLISH */
-    mqtt_publish pkt(PUBLISH_BYTE,
-                                                 pkt_id,
-                                                 topic.size(),
-                                                 topic,
-                                                 payload.size(),
-                                                 payload);
-
-    /* Send payload through TCP to all subscribed clients of the topic */
-    ssize_t sent = 0L;
-    for (auto& sub: t->subscribers)
-    {
-        sol_debug("Sending PUBLISH (d%i, q%u, r%i, m%u, %s, ... (%i bytes))",
-                  pkt.header.bits.dup,
-                  pkt.header.bits.qos,
-                  pkt.header.bits.retain,
-                  pkt.pkt_id,
-                  pkt.topic.data(),
-                  pkt.payloadlen);
-        struct sol_client *sc = sub.client;
-
-        /* Update QoS according to subscriber's one */
-        pkt.header.bits.qos = sub.qos;
-
-        uint iter = 0;
-        std::vector<uint8_t> packed;
-        pkt.pack(packed);
-        if ((sent = send_bytes(sc->fd, packed, iter, packed.size())) < 0)
-            sol_error("Error publishing to %s: %s",
-                      sc->client_id.data(), strerror(errno));
-
-        // Update information stats
-        info.bytes_sent += sent;
-        info.messages_sent++;
-    }
-}
-
-/*
- * Publish statistics periodic task, it will be called once every N config
- * defined seconds, it publish some informations on predefined topics
- */
-static void publish_stats(evloop& loop, void *args)
-{
-    std::string cclients = std::to_string(info.nclients);
-    std::string bsent = std::to_string(info.bytes_sent);
-    std::string msent = std::to_string(info.messages_sent);
-    std::string mrecv = std::to_string(info.messages_recv);
-    long long uptime = time(NULL) - info.start_time;
-    std::string utime = std::to_string(uptime);
-    double sol_uptime = (double)(time(NULL) - info.start_time) / SOL_SECONDS;
-    std::string sutime = std::to_string(sol_uptime);
-
-    publish_message(0, sys_topics[5], utime);
-    publish_message(0, sys_topics[6], sutime);
-    publish_message(0, sys_topics[7], cclients);
-    publish_message(0, sys_topics[9], bsent);
-    publish_message(0, sys_topics[11], msent);
-    publish_message(0, sys_topics[12], mrecv);
-}
 
 static int32_t connect_handler(closure &cb, mqtt_packet* packet)
 {
@@ -460,6 +466,7 @@ static int32_t connect_handler(closure &cb, mqtt_packet* packet)
         sol_info("Received double CONNECT from %s, disconnecting client",
                  pkt->payload.client_id.data());
 
+        shutdown(cb.fd, SHUT_RDWR);
         close(cb.fd);
         sol.clients.erase(pkt->payload.client_id);
         sol.closures.erase(cb.closure_id);
@@ -482,7 +489,7 @@ static int32_t connect_handler(closure &cb, mqtt_packet* packet)
     std::shared_ptr<struct sol_client> new_client(new sol_client);
     new_client->fd = cb.fd;
     new_client->client_id = pkt->payload.client_id;
-    sol.clients.insert(std::make_pair(new_client->client_id, *new_client));
+    sol.clients.insert(std::make_pair(new_client->client_id, new_client));
 
     /* Substitute fd on callback with closure */
     cb.obj = new_client.get();
@@ -501,10 +508,8 @@ static int32_t connect_handler(closure &cb, mqtt_packet* packet)
     {
         // TODO: handle this case
     }
-    mqtt_connack response(CONNACK_BYTE);
-    response.sp = session_present;
-    response.rc = rc;
 
+    mqtt_connack response(CONNACK_BYTE, session_present, rc);
     response.pack(cb.payload);
     sol_debug("Sending CONNACK to %s (%u, %u)", new_client->client_id.data(), session_present, rc);
 
@@ -532,7 +537,7 @@ static void subscription(trie_node<topic> *node, void *arg)
     if (!node || !node->data)
         return;
     struct subscriber* sub = (struct subscriber*)arg;
-    node->data->add_subscriber(sub->client, *sub, true);
+    node->data->add_subscriber(sub->client, sub, true);
 }
 
 static int subscribe_handler(struct closure& cb, mqtt_packet *packet)
@@ -545,10 +550,10 @@ static int subscribe_handler(struct closure& cb, mqtt_packet *packet)
      * We respond to the subscription request with SUBACK and a list of QoS in
      * the same exact order of reception
      */
-    std::vector<uint8_t> rcs(pkt->tuples_len);
+    std::vector<uint8_t> rcs(pkt->tuples.size());
 
     /* Subscribe packets contains a list of topics and QoS tuples */
-    for (uint32_t i = 0; i < pkt->tuples_len; i++)
+    for (uint32_t i = 0; i < pkt->tuples.size(); i++)
     {
         sol_debug("Received SUBSCRIBE from %s", c->client_id.data());
 
@@ -570,8 +575,7 @@ static int subscribe_handler(struct closure& cb, mqtt_packet *packet)
         else if (topicName[pkt->tuples[i].topic_len - 1] != '/')
             topicName += "/";
 
-        std::shared_ptr<struct subscriber> sub =
-                std::make_shared<subscriber>(pkt->tuples[i].qos,
+        struct subscriber* sub = new subscriber(pkt->tuples[i].qos,
                                                 (sol_client*)cb.obj);
 
         struct topic *topic = nullptr;
@@ -581,18 +585,19 @@ static int subscribe_handler(struct closure& cb, mqtt_packet *packet)
         // TODO check for callback correctly set to obj
         if (!topic)
         {
-//            topic = new struct topic(topicName);
-            std::shared_ptr<struct topic> topic = std::make_shared<struct topic>(topicName);
+            struct topic* topic = new struct topic(topicName);
             sol.topics.insert(topicName, topic);
-            topic->add_subscriber((sol_client*)cb.obj, *sub, true);
+            topic->add_subscriber((sol_client*)cb.obj, sub, true);
         }
         else if (wildcard == true)
-            sol.topics.apply_func(topicName, subscription, sub.get());
+            sol.topics.apply_func(topicName, subscription, sub);
+        else
+            topic->add_subscriber((sol_client*)cb.obj, sub, true);
 
         rcs[i] = pkt->tuples[i].qos;
     }
 
-    struct mqtt_suback response(SUBACK_BYTE, pkt->pkt_id, pkt->tuples_len, rcs);
+    struct mqtt_suback response(SUBACK_BYTE, pkt->pkt_id, rcs);
     response.pack(cb.payload);
     sol_debug("Sending SUBACK to %s", c->client_id.data());
 
@@ -645,37 +650,38 @@ static int publish_handler(struct closure& cb, mqtt_packet *packet)
         topic = (struct topic*)tNode->data.get();
     if (!topic)
     {
-//        topic = new struct topic(topicName);
-        std::shared_ptr<struct topic> topic = std::make_shared<struct topic>(topicName);
+        topic = new struct topic(topicName);
         sol.topics.insert(topicName, topic);
     }
-
-    std::vector<uint8_t> pub;
-    for (auto sub: topic->subscribers)
+    else
     {
-        struct sol_client *sc = sub.client;
+        std::vector<uint8_t> pub;
+        for (auto sub: topic->subscribers)
+        {
+            struct sol_client *sc = sub->client;
 
-        /* Update QoS according to subscriber's one */
-        pkt->header.bits.qos = sub.qos;
-        pkt->pack(pub);
+            /* Update QoS according to subscriber's one */
+            pkt->header.bits.qos = sub->qos;
+            pkt->pack(pub);
 
-        ssize_t sent;
-        uint iter = 0;
-        if ((sent = send_bytes(sc->fd, pub, iter, pub.size())) < 0)
-            sol_error("Error publishing to %s: %s",
-                      sc->client_id.data(), strerror(errno));
+            ssize_t sent;
+            uint iter = 0;
+            if ((sent = send_bytes(sc->fd, pub, iter, pub.size())) < 0)
+                sol_error("Error publishing to %s: %s",
+                          sc->client_id.data(), strerror(errno));
 
-        // Update information stats
-        info.bytes_sent += sent;
-        sol_debug("Sending PUBLISH to %s (d%i, q%u, r%i, m%u, %s, ... (%i bytes))",
-                  sc->client_id.data(),
-                  pkt->header.bits.dup,
-                  pkt->header.bits.qos,
-                  pkt->header.bits.retain,
-                  pkt->pkt_id,
-                  pkt->topic.data(),
-                  pkt->payloadlen);
-        info.messages_sent++;
+            // Update information stats
+            info.bytes_sent += sent;
+            sol_debug("Sending PUBLISH to %s (d%i, q%u, r%i, m%u, %s, ... (%i bytes))",
+                      sc->client_id.data(),
+                      pkt->header.bits.dup,
+                      pkt->header.bits.qos,
+                      pkt->header.bits.retain,
+                      pkt->pkt_id,
+                      pkt->topic.data(),
+                      pkt->payloadlen);
+            info.messages_sent++;
+        }
     }
 
     if (qos == AT_LEAST_ONCE)

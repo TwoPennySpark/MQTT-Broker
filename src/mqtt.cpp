@@ -1,8 +1,5 @@
 #include "mqtt.h"
-#include "util.h"
 #include "unistd.h"
-#include "server.h"
-#include "core.h"
 
 const uint8_t MAX_REMAINING_LENGTH_SIZE = 4;
 
@@ -124,10 +121,10 @@ std::shared_ptr<mqtt_packet> mqtt_packet::create(std::vector<uint8_t> &buf)
     mqtt_header hdr = {};
     uint32_t iterator = 0;
     std::shared_ptr<mqtt_packet> ret;
-    ::unpack(buf, iterator, hdr.byte);
+//    ::unpack(buf, iterator, hdr.byte);
 
-    uint8_t type = hdr.bits.type;
-    switch (type)
+//    uint8_t type = hdr.bits.type;
+    switch (buf[0] >> 4)
     {
         case CONNECT:
             ret = create<mqtt_connect>(hdr.byte);
@@ -292,12 +289,11 @@ uint64_t mqtt_subscribe::unpack(const std::vector<uint8_t> &buf, uint& iterator)
         tuples[count].topic.resize(tuples[count].topic_len);
         ::unpack(buf, iterator, tuples[count].topic);
         ::unpack(buf, iterator, tuples[count].qos);
-        remainingBytes -= sizeof(tuples[count].topic_len) +
-                          tuples[count].topic_len +
+        remainingBytes -= tuples[count].topic_len +
                           sizeof(tuples[count].qos);
         count++;
     }
-    tuples_len = count;
+//    tuples_len = count;
 
     return len;
 }

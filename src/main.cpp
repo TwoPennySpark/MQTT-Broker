@@ -6,16 +6,14 @@
 
 using namespace std;
 
+#define PRINT_N_CLEAR(buf) \
+    buf.clear();
 void test_simple_pack_unpack()
 {
     std::vector<uint8_t> buf(64);
     uint32_t iterator = 0;
 //    uint8_t *iterator = buf.data();
 
-#define PRINT_N_CLEAR(buf) \
-    buf.clear();
-//    for (uint i = 0; i < buf.size(); i++) \
-//        printf("%x\n", buf[i]); \
 
     // PACK
     std::vector<uint8_t> u8s = {0, 100, 255};
@@ -193,7 +191,7 @@ void test_pack_unpack()
         // SUBACK
         mqtt_header hdr(0, EXACTLY_ONCE, 1, SUBACK);
         std::vector<uint8_t> rcs = {0, 255, 100, 1};
-        mqtt_suback pkt0(hdr.byte, 65535, rcs.size(), rcs);
+        mqtt_suback pkt0(hdr.byte, 65535, rcs);
 
         std::vector<uint8_t> buf;
         pkt0.pack(buf);

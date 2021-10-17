@@ -12,10 +12,10 @@ struct topic
 {
     topic(std::string& _name): name(_name){}
     std::string name;
-    std::list<subscriber> subscribers;
+    std::list<std::shared_ptr<subscriber>> subscribers;
 
     void add_subscriber(struct sol_client *client,
-                        subscriber &sub,
+                        subscriber *sub,
                         bool cleansession);
 };
 
@@ -50,7 +50,7 @@ struct subscriber
  */
 struct sol
 {
-    std::unordered_map<std::string, sol_client> clients;
+    std::unordered_map<std::string, std::shared_ptr<sol_client>> clients;
     std::unordered_map<std::string, closure> closures;
     trie<topic> topics;
 };

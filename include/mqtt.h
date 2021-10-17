@@ -170,7 +170,7 @@ struct mqtt_subscribe: public mqtt_packet
     mqtt_subscribe() = default;
     mqtt_subscribe(uint8_t _hdr): mqtt_packet (_hdr) {}
     uint16_t pkt_id;
-    uint16_t tuples_len;
+//    uint16_t tuples_len;
     struct tuple{
         uint16_t topic_len;
         std::string topic;
@@ -200,8 +200,8 @@ struct mqtt_suback: public mqtt_packet
 {
     mqtt_suback() = default;
     mqtt_suback(uint8_t _hdr): mqtt_packet (_hdr){}
-    mqtt_suback(uint8_t _hdr, uint16_t _pkt_id, uint16_t _rcslen, const std::vector<uint8_t>& _rcs):
-                mqtt_packet(_hdr), pkt_id(_pkt_id), rcslen(_rcslen), rcs(_rcs){}
+    mqtt_suback(uint8_t _hdr, uint16_t _pkt_id, const std::vector<uint8_t>& _rcs):
+                mqtt_packet(_hdr), pkt_id(_pkt_id), rcslen(_rcs.size()), rcs(_rcs){}
     uint16_t pkt_id;
     uint16_t rcslen;
     std::vector<uint8_t> rcs;

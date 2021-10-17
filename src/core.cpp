@@ -9,12 +9,12 @@
 //                  ((struct subscriber *) c2)->client->client_id);
 //}
 
-void topic::add_subscriber(struct sol_client *client,
-                          struct subscriber& sub,
+void topic::add_subscriber(struct sol_client* client,
+                          struct subscriber* sub,
                           bool cleansession)
 {
 //    std::shared_ptr<struct subscriber> sub(new struct subscriber(qos, client));
-    subscribers.push_back(sub);
+    subscribers.push_back(std::shared_ptr<subscriber>(sub));
     // It must be added to the session if cleansession is false
     if (!cleansession)
         client->session.subscriptions.push_back(*this);

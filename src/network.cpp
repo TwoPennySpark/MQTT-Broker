@@ -62,6 +62,18 @@ int create_and_bind(const std::string& sockpath, uint16_t port)
     }
     addr.sin_port = htons(port);
 
+    socklen_t enable = 1;
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(enable)) < 0)
+    {
+        perror("setsockopt1 error");
+        return -1;
+    }
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) < 0)
+    {
+        perror("setsockopt2 error");
+        return -1;
+    }
+
     if (bind(fd, (struct sockaddr*) &addr, sizeof(addr)) == -1)
     {
         perror("bind error");
@@ -267,7 +279,7 @@ int evloop::evloop_wait()
                    ready for reading, closing connection */
                 perror ("epoll_wait(2)");
                 epoll_del(events[i].data.fd);
-                shutdown(events[i].data.fd, 0);
+                shutdown(events[i].data.fd, SHUT_RDWR);
                 close(events[i].data.fd);
                 status = errno;
                 continue;

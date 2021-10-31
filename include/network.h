@@ -48,7 +48,8 @@ ssize_t recv_bytes(int, std::vector<uint8_t> &, uint &iter, size_t);
  * EPOLL instance use EPOLLONESHOT for each event and must be re-armed
  * manually, in order to allow future uses on a multithreaded architecture.
  */
-class evloop {
+class evloop
+{
 
 private:
     int epollfd;
@@ -121,7 +122,6 @@ public:
 
 typedef void callback(evloop& , void *);
 
-//#define UUID_LEN 16
 /*
  * Callback object, represents a callback function with an associated
  * descriptor if needed, args is a void pointer which can be a structure

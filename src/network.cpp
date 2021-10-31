@@ -1,6 +1,5 @@
 #include "network.h"
 
-//#define _DEFAULT_SOURCE
 #include <stdlib.h>
 #include <errno.h>
 #include <netdb.h>
@@ -277,7 +276,7 @@ int evloop::evloop_wait()
             {
                 /* An error has occured on this fd, or the socket is not
                    ready for reading, closing connection */
-                perror ("epoll_wait(2)");
+                perror ("epoll_wait(3)");
                 epoll_del(events[i].data.fd);
                 shutdown(events[i].data.fd, SHUT_RDWR);
                 close(events[i].data.fd);

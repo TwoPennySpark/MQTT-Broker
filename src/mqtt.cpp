@@ -317,11 +317,9 @@ uint64_t mqtt_unsubscribe::unpack(const std::vector<uint8_t> &buf, uint& iterato
 
         tuples[count].topic.resize(tuples[count].topic_len);
         ::unpack(buf, iterator, tuples[count].topic);
-        remainingBytes -= sizeof(tuples[count].topic_len) +
-                          tuples[count].topic_len;
+        remainingBytes -= tuples[count].topic_len;
         count++;
     }
-    tuples_len = count;
 
     return len;
 }

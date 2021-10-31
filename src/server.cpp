@@ -31,19 +31,19 @@ static struct sol sol;
  * Prototype for a command handler, it accepts a pointer to the closure as the
  * link to the client sender of the command and a pointer to the packet itself
  */
-typedef int handler(struct closure&, mqtt_packet*);
+typedef int handler(struct closure&, mqtt_packet&);
 
 /* Command handler, each one have responsibility over a defined command packet */
-static int connect_handler(struct closure& , mqtt_packet*);
-static int disconnect_handler(struct closure&, mqtt_packet *);
-static int subscribe_handler(struct closure&, mqtt_packet *);
-static int unsubscribe_handler(struct closure&, mqtt_packet *);
-static int publish_handler(struct closure&, mqtt_packet *);
-static int puback_handler(struct closure&, mqtt_packet *);
-static int pubrec_handler(struct closure&, mqtt_packet *);
-static int pubrel_handler(struct closure&, mqtt_packet *);
-static int pubcomp_handler(struct closure&, mqtt_packet *);
-static int pingreq_handler(struct closure&, mqtt_packet *);
+static int connect_handler(struct closure& , mqtt_packet&);
+static int disconnect_handler(struct closure&, mqtt_packet&);
+static int subscribe_handler(struct closure&, mqtt_packet&);
+static int unsubscribe_handler(struct closure&, mqtt_packet&);
+static int publish_handler(struct closure&, mqtt_packet&);
+static int puback_handler(struct closure&, mqtt_packet&);
+static int pubrec_handler(struct closure&, mqtt_packet&);
+static int pubrel_handler(struct closure&, mqtt_packet&);
+static int pubcomp_handler(struct closure&, mqtt_packet&);
+static int pingreq_handler(struct closure&, mqtt_packet&);
 
 /* Command handler mapped usign their position paired with their type */
 static handler *handlers[15] =
@@ -83,6 +83,9 @@ struct connection
 static void on_read(evloop &, void *);
 static void on_write(evloop &, void *);
 static void on_accept(evloop &, void *);
+
+/* Delete all info related to client*/
+void disconnect_cleanup(closure& cb);
 
 /*
  * Periodic task callback, will be executed every N seconds defined on the
@@ -135,7 +138,7 @@ int start_server(const std::string &addr, uint16_t port)
     /* Generate stats topics */
     for (int i = 0; i < SYS_TOPICS; i++)
     {
-        struct topic* sys_topic = new struct topic(sys_topics[i]);
+        std::shared_ptr<topic> sys_topic(new struct topic(sys_topics[i]));
         sol.topics.insert(sys_topics[i], sys_topic);
     }
 
@@ -201,9 +204,12 @@ static void publish_message(uint16_t pkt_id,
         std::vector<uint8_t> packed;
         pkt.pack(packed);
         if ((sent = send_bytes(sc->fd, packed, iter, packed.size())) < 0)
-            sol_error("Error publishing to %s: %s",
+        {
+            sol_info("Error publishing to %s: %s",
                       sc->client_id.data(), strerror(errno));
-
+//            disconnect_cleanup();
+            continue;
+        }
         // Update information stats
         info.bytes_sent += sent;
         info.messages_sent++;
@@ -251,7 +257,7 @@ static int accept_new_client(int fd, struct connection *conn)
     if (getpeername(clientsock, (struct sockaddr *) &addr, &addrlen) < 0)
         return -1;
     char ip_buff[INET_ADDRSTRLEN + 1];
-    if (inet_ntop(AF_INET, &addr.sin_addr, ip_buff, sizeof(ip_buff)) == NULL)
+    if (inet_ntop(AF_INET, &addr.sin_addr, ip_buff, sizeof(ip_buff)) == nullptr)
         return -1;
     struct sockaddr_in sin;
     socklen_t sinlen = sizeof(sin);
@@ -281,7 +287,7 @@ static void on_accept(evloop& loop, void *arg)
     client_closure->args = client_closure;
     client_closure->call = on_read;
     generate_uuid(client_closure->closure_id);
-    sol.closures.insert(std::make_pair(client_closure->closure_id, *client_closure));
+    sol.closures.insert(std::make_pair(client_closure->closure_id, client_closure));
     /* Add it to the epoll loop */
     loop.evloop_add_callback(client_closure);
     /* Rearm server fd to accept new connections */
@@ -304,16 +310,15 @@ static void on_accept(evloop& loop, void *arg)
  * - flags -> flags pointer, copy the flag setting of the incoming packet,
  *            again for simplicity and convenience of the caller.
  */
-static ssize_t recv_packet(int clientfd, std::vector<uint8_t>& buf,
-                           uint recvIter)
+static ssize_t recv_packet(int clientfd, std::vector<uint8_t>& buf)
 {
-    ssize_t nbytes = 0;
+    uint iter = 0;
 
     /* Read the first byte, it should contain the message type code */
-    if ((nbytes = recv_bytes(clientfd, buf, recvIter, 1)) <= 0)
+    if (recv_bytes(clientfd, buf, iter, 1) <= 0)
         return -ERRCLIENTDC;
-    uint8_t byte = buf[0] >> 4;
-    if (DISCONNECT < byte || CONNECT > byte)
+    uint8_t type = mqtt_header(buf[0]).bits.type; // buf[0] >> 4;
+    if (DISCONNECT < type || CONNECT > type)
         return -ERRPACKETERR;
 
     /*
@@ -322,35 +327,25 @@ static ssize_t recv_packet(int clientfd, std::vector<uint8_t>& buf,
      * length.
      */
     ssize_t n = 0;
+    uint64_t tlen = 0;
     do {
-        if ((n = recv_bytes(clientfd, buf, recvIter, 1)) <= 0)
+        if ((n = recv_bytes(clientfd, buf, iter, 1)) <= 0)
             return -ERRCLIENTDC;
-        nbytes += n;
-    } while (buf[recvIter-1] & (1 << 7)); // TO DO: add check for remaining len > 4
-
-    uint decodeIter = 0;
-    decodeIter += sizeof(uint8_t);
-    uint64_t tlen = mqtt_decode_length(buf, decodeIter);
+        tlen |= ((buf[iter-1] & ((1u << 7)-1)) << (iter-1)*7);
+    } while (buf[iter-1] & (1 << 7) && iter <= 4);
 
     /*
      * Set return code to -ERRMAXREQSIZE in case the total packet len exceeds
      * the configuration limit `max_request_size`
      */
-    if (tlen > conf->max_request_size) {
-        nbytes = -ERRMAXREQSIZE;
-        goto exit;
-    }
+    if (tlen > conf->max_request_size)
+        return -ERRMAXREQSIZE;
 
     /* Read remaining bytes to complete the packet */
-    if ((n = recv_bytes(clientfd, buf, recvIter, tlen)) < 0)
-        goto err;
-    nbytes += n;
-exit:
-    return nbytes;
-err:
-    shutdown(clientfd, SHUT_RDWR);
-    close(clientfd);
-    return nbytes;
+    if (recv_bytes(clientfd, buf, iter, tlen) <= 0)
+        return -ERRCLIENTDC;
+
+    return iter;
 }
 
 /* Handle incoming requests, after being accepted or after a reply */
@@ -358,12 +353,10 @@ static void on_read(evloop& loop, void *arg)
 {
     struct closure *cb = (closure*)arg;
 
-    /* Raw bytes buffer to handle input from client */
+    /* buffer to handle input from client */
     std::vector<uint8_t> buffer(conf->max_request_size);
-    uint iter = 0;
-    ssize_t bytes = 0;
-    int rc = 0;
     std::shared_ptr<mqtt_packet> pkt;
+    int rc = 0;
 
     /*
      * We must read all incoming bytes till an entire packet is received. This
@@ -371,7 +364,7 @@ static void on_read(evloop& loop, void *arg)
      * send the size of the remaining packet as the second byte. By knowing it
      * we know if the packet is ready to be deserialized and used.
      */
-    bytes = recv_packet(cb->fd, buffer, iter);
+    ssize_t bytes = recv_packet(cb->fd, buffer);
 
     /*
      * Looks like we got a client disconnection.
@@ -381,14 +374,14 @@ static void on_read(evloop& loop, void *arg)
      *       client connected.
      */
     if (bytes == -ERRCLIENTDC || bytes == -ERRMAXREQSIZE)
-        goto exit;
+        goto errdc;
 
     /*
      * If a not correct packet received, we must free the buffer and reset the
      * handler to the request again, setting EPOLL to EPOLLIN
      */
     if (bytes == -ERRPACKETERR)
-        goto errdc;
+        goto exit;
     info.bytes_recv++;
 
     /*
@@ -396,12 +389,12 @@ static void on_read(evloop& loop, void *arg)
      * correct handler based on the type of the operation.
      */
     if (!(pkt = mqtt_packet::create(buffer)))
-        goto errdc;
+        goto exit;
 
     /* Execute command callback */
     if (!handlers[pkt->header.bits.type])
-        goto errdc;
-    rc = handlers[pkt->header.bits.type](*cb, pkt.get());
+        goto exit;
+    rc = handlers[pkt->header.bits.type](*cb, *pkt);
     if (rc == REARM_W)
     {
         cb->call = on_write;
@@ -416,21 +409,18 @@ static void on_read(evloop& loop, void *arg)
         cb->call = on_read;
         loop.evloop_rearm_callback_read(cb);
     }
-    // Disconnect packet received
-exit:
+    else
+        goto errdc;
     return;
+
+    // Discard packet received
+exit:
+    loop.evloop_rearm_callback_read(cb);
+    return;
+    // Disconnect
 errdc:
-    sol_error("Dropping client");
-    loop.epoll_del(cb->fd);
-    shutdown(cb->fd, SHUT_RDWR);
-    close(cb->fd);
-    if (cb->obj)
-    {
-        sol.clients.erase(((struct sol_client *) cb->obj)->client_id);
-        sol.closures.erase(cb->closure_id);
-        info.nclients--;
-        info.nconnections--;
-    }
+    sol_error("[on_read]Dropping client");
+    disconnect_cleanup(*cb);
     return;
 }
 
@@ -440,9 +430,12 @@ static void on_write(evloop &loop, void *arg)
     ssize_t sent;
     uint iter = 0;
     if ((sent = send_bytes(cb->fd, cb->payload, iter, cb->payload.size())) < 0)
-        sol_error("Error writing on socket to client %s: %s",
+    {
+        sol_info("[on_write]Error writing on socket to client %s: %s",
                   ((struct sol_client *) cb->obj)->client_id.data(), strerror(errno));
-
+        disconnect_cleanup(*cb);
+        return;
+    }
     // Update information stats
     info.bytes_sent += sent;
 
@@ -452,54 +445,59 @@ static void on_write(evloop &loop, void *arg)
      */
     cb->call = on_read;
     loop.evloop_rearm_callback_read(cb);
+
+    return;
 }
 
-
-static int32_t connect_handler(closure &cb, mqtt_packet* packet)
+void disconnect_cleanup(closure& cb)
 {
-    mqtt_connect* pkt = dynamic_cast<mqtt_connect*>(packet);
-    if (sol.clients.find(pkt->payload.client_id) != sol.clients.end())
+//    loop.epoll_del(cb->fd);
+    shutdown(cb.fd, SHUT_RDWR);
+    close(cb.fd);
+    if (cb.obj)
+    {
+        sol.clients.erase(((struct sol_client *) cb.obj)->client_id);
+        sol.closures.erase(cb.closure_id);
+        info.nclients--;
+        info.nconnections--;
+    }
+}
+
+static int32_t connect_handler(closure &cb, mqtt_packet& packet)
+{
+    mqtt_connect& pkt = dynamic_cast<mqtt_connect&>(packet);
+    if (sol.clients.find(pkt.payload.client_id) != sol.clients.end())
     {
         // Already connected client, 2 CONNECT packet should be interpreted as
         // a violation of the protocol, causing disconnection of the client
 
         sol_info("Received double CONNECT from %s, disconnecting client",
-                 pkt->payload.client_id.data());
-
-        shutdown(cb.fd, SHUT_RDWR);
-        close(cb.fd);
-        sol.clients.erase(pkt->payload.client_id);
-        sol.closures.erase(cb.closure_id);
-
-        // Update stats
-        info.nclients--;
-        info.nconnections--;
-
+                 pkt.payload.client_id.data());
         return -REARM_W;
     }
     sol_info("New client connected as %s (c%i, k%u)",
-             pkt->payload.client_id.data(),
-             pkt->vhdr.bits.clean_session,
-             pkt->payload.keepalive);
+             pkt.payload.client_id.data(),
+             pkt.vhdr.bits.clean_session,
+             pkt.payload.keepalive);
 
     /*
      * Add the new connected client to the global map, if it is already
      * connected, kick him out accordingly to the MQTT v3.1.1 specs.
      */
-    std::shared_ptr<struct sol_client> new_client(new sol_client);
+    struct sol_client* new_client = new sol_client;
     new_client->fd = cb.fd;
-    new_client->client_id = pkt->payload.client_id;
+    new_client->client_id = pkt.payload.client_id;
     sol.clients.insert(std::make_pair(new_client->client_id, new_client));
 
     /* Substitute fd on callback with closure */
-    cb.obj = new_client.get();
+    cb.obj = new_client;
 
     /* Respond with a connack */
     uint8_t session_present = 0;
     uint8_t connect_flags = 0 | (session_present & 0x1) << 0;
     uint8_t rc = 0;  // 0 means connection accepted
 
-    if (pkt->vhdr.bits.clean_session)
+    if (pkt.vhdr.bits.clean_session)
     {
         session_present = 0;
         rc = 0;
@@ -516,7 +514,7 @@ static int32_t connect_handler(closure &cb, mqtt_packet* packet)
     return REARM_W;
 }
 
-static int disconnect_handler(struct closure& cb, mqtt_packet *pkt)
+static int disconnect_handler(struct closure& cb, mqtt_packet& packet)
 {
     // TODO just return error_code and handle it on `on_read`
     /* Handle disconnection request from client */
@@ -538,119 +536,136 @@ static void subscription(trie_node<topic> *node, void *arg)
         return;
     struct subscriber* sub = (struct subscriber*)arg;
     node->data->add_subscriber(sub->client, sub, true);
+    sub->client->session.subscriptions.push_back(node->data);
 }
 
-static int subscribe_handler(struct closure& cb, mqtt_packet *packet)
+static int subscribe_handler(struct closure& cb, mqtt_packet& packet)
 {
     struct sol_client *c = (sol_client*)cb.obj;
     bool wildcard = false;
-    mqtt_subscribe* pkt = dynamic_cast<mqtt_subscribe*>(packet);
+    mqtt_subscribe& pkt = dynamic_cast<mqtt_subscribe&>(packet);
 
     /*
      * We respond to the subscription request with SUBACK and a list of QoS in
      * the same exact order of reception
      */
-    std::vector<uint8_t> rcs(pkt->tuples.size());
+    std::vector<uint8_t> rcs(pkt.tuples.size());
 
     /* Subscribe packets contains a list of topics and QoS tuples */
-    for (uint32_t i = 0; i < pkt->tuples.size(); i++)
+    for (uint32_t i = 0; i < pkt.tuples.size(); i++)
     {
         sol_debug("Received SUBSCRIBE from %s", c->client_id.data());
 
-        /*
-         * Check if the topic exists already or in case create it and store in
-         * the global map
-         */
-        std::string topicName = pkt->tuples[i].topic;
-        sol_debug("\t%s (QoS %i)", topicName.data(), pkt->tuples[i].qos);
+        std::string topicName = pkt.tuples[i].topic;
+        sol_debug("\t%s (QoS %i)", topicName.data(), pkt.tuples[i].qos);
 
         /* Recursive subscribe to all children topics if the topic ends with "/#" */
-        if (topicName[pkt->tuples[i].topic_len - 1] == '#' &&
-            topicName[pkt->tuples[i].topic_len - 2] == '/')
+        if (topicName[pkt.tuples[i].topic_len - 1] == '#' &&
+            topicName[pkt.tuples[i].topic_len - 2] == '/')
         {
             topicName.erase(std::remove(topicName.begin(), topicName.end(), '#'),
                             topicName.end());
             wildcard = true;
         }
-        else if (topicName[pkt->tuples[i].topic_len - 1] != '/')
+        else if (topicName[pkt.tuples[i].topic_len - 1] != '/')
             topicName += "/";
 
-        struct subscriber* sub = new subscriber(pkt->tuples[i].qos,
+        struct subscriber* sub = new subscriber(pkt.tuples[i].qos,
                                                 (sol_client*)cb.obj);
 
-        struct topic *topic = nullptr;
+        /*
+         * Check if the topic exists already or in case create it and store in
+         * the global map
+         */
+        std::shared_ptr<struct topic> topic;
         trie_node<struct topic> *tNode = sol.topics.find(topicName);
         if (tNode && tNode->data)
-            topic = tNode->data.get();
+            topic = tNode->data;
         // TODO check for callback correctly set to obj
         if (!topic)
         {
-            struct topic* topic = new struct topic(topicName);
+            std::shared_ptr<struct topic> topic = std::make_shared<struct topic>(topicName);
             sol.topics.insert(topicName, topic);
             topic->add_subscriber((sol_client*)cb.obj, sub, true);
+            c->session.subscriptions.push_back(topic);
         }
         else if (wildcard == true)
             sol.topics.apply_func(topicName, subscription, sub);
         else
+        {
             topic->add_subscriber((sol_client*)cb.obj, sub, true);
+            c->session.subscriptions.push_back(topic);
+        }
 
-        rcs[i] = pkt->tuples[i].qos;
+        rcs[i] = pkt.tuples[i].qos;
     }
 
-    struct mqtt_suback response(SUBACK_BYTE, pkt->pkt_id, rcs);
+    struct mqtt_suback response(SUBACK_BYTE, pkt.pkt_id, rcs);
     response.pack(cb.payload);
     sol_debug("Sending SUBACK to %s", c->client_id.data());
 
     return REARM_W;
 }
 
-static int unsubscribe_handler(struct closure& cb, mqtt_packet *packet)
+static int unsubscribe_handler(struct closure& cb, mqtt_packet& packet)
 {
     struct sol_client *c = (sol_client *)cb.obj;
-    mqtt_unsubscribe* pkt = dynamic_cast<mqtt_unsubscribe*>(packet);
+    mqtt_unsubscribe& pkt = dynamic_cast<mqtt_unsubscribe&>(packet);
     sol_debug("Received UNSUBSCRIBE from %s", c->client_id.data());
 
-    mqtt_ack(UNSUBACK_BYTE, pkt->pkt_id);
-    pkt->pack(cb.payload);
+    for (auto tuple: pkt.tuples)
+        for (auto it = c->session.subscriptions.begin();
+                  it != c->session.subscriptions.end(); it++)
+            if (it->get()->name == tuple.topic)
+            {
+                it->get()->del_subscriber(c, c->session.cleansession);
+                c->session.subscriptions.erase(it);
+                if (tuple.topic[0] != '$' && !it->get()->subscribers.size())
+                    sol.topics.erase(tuple.topic);
+                break;
+            }
 
+    mqtt_ack unsuback(UNSUBACK_BYTE, pkt.pkt_id);
+    unsuback.pack(cb.payload);
     sol_debug("Sending UNSUBACK to %s", c->client_id.data());
+
     return REARM_W;
 }
 
-static int publish_handler(struct closure& cb, mqtt_packet *packet)
+static int publish_handler(struct closure& cb, mqtt_packet& packet)
 {
     struct sol_client *c = (sol_client*)cb.obj;
-    mqtt_publish* pkt = dynamic_cast<mqtt_publish*>(packet);
+    mqtt_publish& pkt = dynamic_cast<mqtt_publish&>(packet);
     sol_debug("Received PUBLISH from %s (d%i, q%u, r%i, m%u, %s, ... (%i bytes))",
               c->client_id.data(),
-              pkt->header.bits.dup,
-              pkt->header.bits.qos,
-              pkt->header.bits.retain,
-              pkt->pkt_id,
-              pkt->topic.data(),
-              pkt->payloadlen);
+              pkt.header.bits.dup,
+              pkt.header.bits.qos,
+              pkt.header.bits.retain,
+              pkt.pkt_id,
+              pkt.topic.data(),
+              pkt.payloadlen);
     info.messages_recv++;
-    std::string topicName = pkt->topic;
-    unsigned char qos = pkt->header.bits.qos;
+    std::string topicName = pkt.topic;
+    unsigned char qos = pkt.header.bits.qos;
 
     /*
      * For convenience we assure that all topics ends with a '/', indicating a
      * hierarchical level
      */
-    if (topicName[pkt->topiclen - 1] != '/')
+    if (topicName[pkt.topiclen - 1] != '/')
         topicName += '/';
 
     /*
      * Retrieve the topic from the global map, if it wasn't created before,
      * create a new one with the name selected
      */
-    struct topic *topic = nullptr;
+    std::shared_ptr<topic> topic;
     trie_node<struct topic> *tNode = sol.topics.find(topicName);
     if (tNode && tNode->data)
-        topic = (struct topic*)tNode->data.get();
+        topic = tNode->data;
     if (!topic)
     {
-        topic = new struct topic(topicName);
+        topic = std::make_shared<struct topic>(topicName);
         sol.topics.insert(topicName, topic);
     }
     else
@@ -661,39 +676,43 @@ static int publish_handler(struct closure& cb, mqtt_packet *packet)
             struct sol_client *sc = sub->client;
 
             /* Update QoS according to subscriber's one */
-            pkt->header.bits.qos = sub->qos;
-            pkt->pack(pub);
+            pkt.header.bits.qos = sub->qos;
+            pkt.pack(pub);
 
             ssize_t sent;
             uint iter = 0;
             if ((sent = send_bytes(sc->fd, pub, iter, pub.size())) < 0)
+            {
                 sol_error("Error publishing to %s: %s",
                           sc->client_id.data(), strerror(errno));
+//                disconnect_cleanup(cb);
+                continue;
+            }
 
             // Update information stats
             info.bytes_sent += sent;
             sol_debug("Sending PUBLISH to %s (d%i, q%u, r%i, m%u, %s, ... (%i bytes))",
                       sc->client_id.data(),
-                      pkt->header.bits.dup,
-                      pkt->header.bits.qos,
-                      pkt->header.bits.retain,
-                      pkt->pkt_id,
-                      pkt->topic.data(),
-                      pkt->payloadlen);
+                      pkt.header.bits.dup,
+                      pkt.header.bits.qos,
+                      pkt.header.bits.retain,
+                      pkt.pkt_id,
+                      pkt.topic.data(),
+                      pkt.payloadlen);
             info.messages_sent++;
         }
     }
 
     if (qos == AT_LEAST_ONCE)
     {
-        mqtt_puback puback = mqtt_ack(PUBACK_BYTE, pkt->pkt_id);
+        mqtt_puback puback = mqtt_ack(PUBACK_BYTE, pkt.pkt_id);
         puback.pack(cb.payload);
         sol_debug("Sending PUBACK to %s", c->client_id.data());
         return REARM_W;
     } else if (qos == EXACTLY_ONCE)
     {
         // TODO add to a hashtable to track PUBREC clients last
-        mqtt_pubrec pubrec = mqtt_ack(PUBREC_BYTE, pkt->pkt_id);
+        mqtt_pubrec pubrec = mqtt_ack(PUBREC_BYTE, pkt.pkt_id);
         pubrec.pack(cb.payload);
         sol_debug("Sending PUBREC to %s", c->client_id.data());
         return REARM_W;
@@ -706,7 +725,7 @@ static int publish_handler(struct closure& cb, mqtt_packet *packet)
     return REARM_R;
 }
 
-static int puback_handler(struct closure& cb, mqtt_packet *pkt)
+static int puback_handler(struct closure& cb, mqtt_packet& packet)
 {
     sol_debug("Received PUBACK from %s",
               ((struct sol_client *) cb.obj)->client_id.data());
@@ -714,32 +733,32 @@ static int puback_handler(struct closure& cb, mqtt_packet *pkt)
     return REARM_R;
 }
 
-static int pubrec_handler(struct closure& cb, mqtt_packet *packet)
+static int pubrec_handler(struct closure& cb, mqtt_packet& packet)
 {
     struct sol_client *c = (sol_client *)cb.obj;
-    mqtt_pubrec* pkt = dynamic_cast<mqtt_pubrec*>(packet);
+    mqtt_pubrec& pkt = dynamic_cast<mqtt_pubrec&>(packet);
     sol_debug("Received PUBREC from %s", c->client_id.data());
-    mqtt_ack pubrel(PUBREL_BYTE, pkt->pkt_id);
+    mqtt_ack pubrel(PUBREL_BYTE, pkt.pkt_id);
     pubrel.pack(cb.payload);
 
     sol_debug("Sending PUBREL to %s", c->client_id.data());
     return REARM_W;
 }
 
-static int pubrel_handler(struct closure& cb, mqtt_packet *packet)
+static int pubrel_handler(struct closure& cb, mqtt_packet& packet)
 {
     struct sol_client *c = (sol_client *)cb.obj;
-    mqtt_pubcomp* pkt = dynamic_cast<mqtt_pubcomp*>(packet);
+    mqtt_pubcomp& pkt = dynamic_cast<mqtt_pubcomp&>(packet);
     sol_debug("Received PUBREL from %s",
               ((struct sol_client *) cb.obj)->client_id.data());
-    mqtt_ack pubcomp(PUBCOMP_BYTE, pkt->pkt_id);
+    mqtt_ack pubcomp(PUBCOMP_BYTE, pkt.pkt_id);
     pubcomp.pack(cb.payload);
 
     sol_debug("Sending PUBCOMP to %s", c->client_id.data());
     return REARM_W;
 }
 
-static int pubcomp_handler(struct closure& cb, mqtt_packet *packet)
+static int pubcomp_handler(struct closure& cb, mqtt_packet& packet)
 {
     sol_debug("Received PUBCOMP from %s",
               ((struct sol_client *) cb.obj)->client_id.data());
@@ -747,13 +766,13 @@ static int pubcomp_handler(struct closure& cb, mqtt_packet *packet)
     return REARM_R;
 }
 
-static int pingreq_handler(closure &cb, mqtt_packet *packet)
+static int pingreq_handler(struct closure &cb, mqtt_packet& packet)
 {
     struct sol_client *c = (sol_client *)cb.obj;
     sol_debug("Received PINGREQ from %s",
               ((struct sol_client *) cb.obj)->client_id.data());
-    packet->header = PINGRESP_BYTE;
-    packet->pack(cb.payload);
+    packet.header = PINGRESP_BYTE;
+    packet.pack(cb.payload);
 
     sol_debug("Sending PINGRESP to %s", c->client_id.data());
     return REARM_W;

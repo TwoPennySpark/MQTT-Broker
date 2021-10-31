@@ -186,7 +186,6 @@ struct mqtt_unsubscribe: public mqtt_packet
     mqtt_unsubscribe() = default;
     mqtt_unsubscribe(uint8_t _hdr): mqtt_packet (_hdr) {}
     uint16_t pkt_id;
-    uint16_t tuples_len;
     struct tuple{
         uint16_t topic_len;
         std::string topic;

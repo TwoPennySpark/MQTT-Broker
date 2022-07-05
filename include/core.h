@@ -5,15 +5,6 @@
 #include <set>
 #include <unordered_map>
 #include "trie.h"
-#include "network.h"
-
-/*
- * 3 operations:
- * 1) publish: TOPICs needs to store it's SUBs list
- * 2) unsub: CLIENTs needs to store info about TOPICs they're subscribed to
- * 3) disconnect: server needs to remove all apearances of CLIENT connected to TOPICs
- */
-
 
 struct topic;
 
@@ -34,6 +25,7 @@ struct sol_client
     int fd;
     std::string client_id;
     struct session session;
+    std::shared_ptr<struct closure> cb;
 };
 
 struct subscriber
@@ -85,7 +77,7 @@ struct topic
 struct sol
 {
     trie<topic> topics;
-    std::unordered_map<std::string, std::shared_ptr<closure>> closures;
+//    std::unordered_map<std::string, std::shared_ptr<closure>> closures;
     std::unordered_map<std::string, std::shared_ptr<sol_client>> clients;
 };
 

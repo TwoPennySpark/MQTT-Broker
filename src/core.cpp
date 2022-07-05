@@ -41,9 +41,8 @@ sol_client::~sol_client()
     for (auto el: session.subscriptions)
     {
         el->del_subscriber(this, session.cleansession);
-        if (el.get()->name[0] != '$')
-            el.reset();
+        el.reset();
     }
-//    session.subscriptions.clear();
+    cb.reset();
     printf("CLIENT DELETED\n");
 }

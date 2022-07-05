@@ -2,11 +2,18 @@
 #define MQTT_H
 
 #include <memory>
-#include "pack.h"
+#include <vector>
 
 #define MQTT_HEADER_LEN_MIN 2 // header(1 byte) + min possible len of Remaining Length field(1 byte)
 #define MQTT_HEADER_LEN_MAX 5 // header(1 byte) + max possible len of Remaining Length field(4 byte)
 #define MQTT_ACK_LEN    4
+
+/*
+ * 3 operations:
+ * 1) publish: TOPICs needs to store it's SUBs list
+ * 2) unsub: CLIENTs needs to store info about TOPICs they're subscribed to
+ * 3) disconnect: server needs to remove all apearances of CLIENT connected to TOPICs
+ */
 
 /*
  * Stub bytes, useful for generic replies, these represent the first byte in
@@ -41,31 +48,16 @@ enum packet_type
     DISCONNECT  = 14
 };
 
-//{
-//    nullptr,
-//    unpack_mqtt_connect, //
-//    nullptr,
-//    unpack_mqtt_publish,
-//    unpack_mqtt_ack,
-//    unpack_mqtt_ack,
-//    unpack_mqtt_ack,
-//    unpack_mqtt_ack,
-//    unpack_mqtt_subscribe, //
-//    unpack_mqtt_suback,
-//    unpack_mqtt_unsubscribe, //
-//    unpack_mqtt_ack,
-//    nullptr,
-//    nullptr,
-//    nullptr
-//};
-
 enum qos_level { AT_MOST_ONCE, AT_LEAST_ONCE, EXACTLY_ONCE };
+
+namespace tps {namespace net {struct message;}}
 
 union mqtt_header
 {
     mqtt_header() = default;
     mqtt_header(uint8_t _byte): byte(_byte) {}
     mqtt_header(uint8_t _retain, uint8_t _qos, uint8_t _dup, uint8_t _type): bits(_retain, _qos, _dup, _type){}
+
     uint8_t byte;
     struct hdr
     {
@@ -84,6 +76,7 @@ struct mqtt_packet
     union mqtt_header header;
     mqtt_packet() = default;
     mqtt_packet(uint8_t _hdr): header(_hdr){}
+    virtual ~mqtt_packet() = default;
 
     template<typename T, typename... Args>
     static std::shared_ptr<T> create(uint8_t hdr, Args... args)
@@ -91,12 +84,11 @@ struct mqtt_packet
         return std::shared_ptr<T>(new T(hdr, args...));
     }
 
-    static std::shared_ptr<mqtt_packet> create(std::vector<uint8_t>& buf);
+    static std::shared_ptr<mqtt_packet> create(tps::net::message& msg);
 
-    virtual uint64_t pack(std::vector<uint8_t>&);
-    virtual uint64_t unpack(const std::vector<uint8_t>& buf, uint& iterator);
+    virtual void pack(tps::net::message&);
+    virtual void unpack(tps::net::message &msg);
 
-    virtual ~mqtt_packet() = default;
 };
 
 struct mqtt_connect: public mqtt_packet
@@ -140,8 +132,7 @@ struct mqtt_connect: public mqtt_packet
     }/*payload*/;
     payload payload;
 
-    uint64_t unpack(const std::vector<uint8_t>& buf, uint& iterator) override;
-//    virtual int32_t handle(struct closure& cb) override;
+    void unpack(tps::net::message& msg) override;
 };
 
 struct mqtt_connack: public mqtt_packet
@@ -162,7 +153,7 @@ struct mqtt_connack: public mqtt_packet
     session sp;
     uint8_t rc;
 
-    uint64_t pack(std::vector<uint8_t>& buf) override;
+    void pack(tps::net::message& msg) override;
 };
 
 struct mqtt_subscribe: public mqtt_packet
@@ -178,7 +169,7 @@ struct mqtt_subscribe: public mqtt_packet
     };
     std::vector<tuple> tuples;
 
-    uint64_t unpack(const std::vector<uint8_t>& buf, uint& iterator) override;
+    void unpack(tps::net::message& msg) override;
 };
 
 struct mqtt_unsubscribe: public mqtt_packet
@@ -192,7 +183,7 @@ struct mqtt_unsubscribe: public mqtt_packet
     };
     std::vector<tuple> tuples;
 
-    uint64_t unpack(const std::vector<uint8_t>& buf, uint& iterator) override;
+    void unpack(tps::net::message& msg) override;
 };
 
 struct mqtt_suback: public mqtt_packet
@@ -200,13 +191,12 @@ struct mqtt_suback: public mqtt_packet
     mqtt_suback() = default;
     mqtt_suback(uint8_t _hdr): mqtt_packet (_hdr){}
     mqtt_suback(uint8_t _hdr, uint16_t _pkt_id, const std::vector<uint8_t>& _rcs):
-                mqtt_packet(_hdr), pkt_id(_pkt_id), rcslen(_rcs.size()), rcs(_rcs){}
+                mqtt_packet(_hdr), pkt_id(_pkt_id), rcs(_rcs){}
     uint16_t pkt_id;
-    uint16_t rcslen;
     std::vector<uint8_t> rcs;
 
-    uint64_t pack(std::vector<uint8_t>& buf) override;
-    uint64_t unpack(const std::vector<uint8_t>& buf, uint& iterator) override;
+    void pack(tps::net::message& msg) override;
+    void unpack(tps::net::message& msg) override;
 };
 
 struct mqtt_publish: public mqtt_packet
@@ -223,8 +213,8 @@ struct mqtt_publish: public mqtt_packet
     uint16_t payloadlen;
     std::string payload;
 
-    uint64_t unpack(const std::vector<uint8_t>& buf, uint& iterator) override;
-    uint64_t pack(std::vector<uint8_t>& buf) override;
+    void unpack(tps::net::message& msg) override;
+    void pack(tps::net::message& msg) override;
 };
 
 struct mqtt_ack: public mqtt_packet
@@ -234,8 +224,8 @@ struct mqtt_ack: public mqtt_packet
     mqtt_ack(uint8_t _hdr, uint16_t _pkt_id): mqtt_packet(_hdr), pkt_id(_pkt_id){}
     uint16_t pkt_id;
 
-    uint64_t unpack(const std::vector<uint8_t>& buf, uint& iterator) override;
-    uint64_t pack(std::vector<uint8_t>& buf) override;
+    void unpack(tps::net::message& msg) override;
+    void pack(tps::net::message& msg) override;
 };
 
 typedef struct mqtt_ack mqtt_puback;
@@ -247,10 +237,8 @@ typedef union mqtt_header mqtt_pingreq;
 typedef union mqtt_header mqtt_pingresp;
 typedef union mqtt_header mqtt_disconnect;
 
-uint8_t mqtt_encode_length(std::vector<uint8_t>& buf, uint32_t& iterator, size_t len);
-uint64_t mqtt_decode_length(const std::vector<uint8_t>& buf, uint32_t& iterator);
-uint64_t unpack_mqtt_packet(const std::vector<uint8_t>& buf, mqtt_packet& pkt);
-std::shared_ptr<std::vector<uint8_t> > pack_mqtt_packet(const mqtt_packet& pkt);
+uint8_t mqtt_encode_length(tps::net::message &msg, size_t len);
+uint32_t mqtt_decode_length(tps::net::message &msg);
 
 
 #endif // MQTT_H

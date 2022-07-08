@@ -30,7 +30,7 @@
 #define PINGRESP_BYTE 0xD0
 
 /* Message types */
-enum packet_type
+enum class packet_type: uint8_t
 {
     CONNECT     = 1,
     CONNACK     = 2,
@@ -50,7 +50,7 @@ enum packet_type
 
 enum qos_level { AT_MOST_ONCE, AT_LEAST_ONCE, EXACTLY_ONCE };
 
-namespace tps {namespace net {struct message;}}
+namespace tps {namespace net {template <typename T> struct message;}}
 
 union mqtt_header
 {
@@ -84,11 +84,10 @@ struct mqtt_packet
         return std::shared_ptr<T>(new T(hdr, args...));
     }
 
-    static std::shared_ptr<mqtt_packet> create(tps::net::message& msg);
+    static std::shared_ptr<mqtt_packet> create(tps::net::message<mqtt_header>& msg);
 
-    virtual void pack(tps::net::message&);
-    virtual void unpack(tps::net::message &msg);
-
+    virtual void pack(tps::net::message<mqtt_header>&);
+    virtual void unpack(tps::net::message<mqtt_header>&);
 };
 
 struct mqtt_connect: public mqtt_packet
@@ -113,7 +112,7 @@ struct mqtt_connect: public mqtt_packet
             uint8_t password : 1;
             uint8_t username : 1;
         } bits;
-    }/*vhdr*/;
+    };
     variable_header vhdr;
 
     struct payload
@@ -129,10 +128,10 @@ struct mqtt_connect: public mqtt_packet
         std::string password;
         std::string will_topic;
         std::string will_message;
-    }/*payload*/;
+    };
     payload payload;
 
-    void unpack(tps::net::message& msg) override;
+    void unpack(tps::net::message<mqtt_header>& msg) override;
 };
 
 struct mqtt_connack: public mqtt_packet
@@ -153,7 +152,7 @@ struct mqtt_connack: public mqtt_packet
     session sp;
     uint8_t rc;
 
-    void pack(tps::net::message& msg) override;
+    void pack(tps::net::message<mqtt_header> &msg) override;
 };
 
 struct mqtt_subscribe: public mqtt_packet
@@ -161,7 +160,6 @@ struct mqtt_subscribe: public mqtt_packet
     mqtt_subscribe() = default;
     mqtt_subscribe(uint8_t _hdr): mqtt_packet (_hdr) {}
     uint16_t pkt_id;
-//    uint16_t tuples_len;
     struct tuple{
         uint16_t topic_len;
         std::string topic;
@@ -169,7 +167,7 @@ struct mqtt_subscribe: public mqtt_packet
     };
     std::vector<tuple> tuples;
 
-    void unpack(tps::net::message& msg) override;
+    void unpack(tps::net::message<mqtt_header>& msg) override;
 };
 
 struct mqtt_unsubscribe: public mqtt_packet
@@ -183,7 +181,7 @@ struct mqtt_unsubscribe: public mqtt_packet
     };
     std::vector<tuple> tuples;
 
-    void unpack(tps::net::message& msg) override;
+    void unpack(tps::net::message<mqtt_header>& msg) override;
 };
 
 struct mqtt_suback: public mqtt_packet
@@ -195,8 +193,8 @@ struct mqtt_suback: public mqtt_packet
     uint16_t pkt_id;
     std::vector<uint8_t> rcs;
 
-    void pack(tps::net::message& msg) override;
-    void unpack(tps::net::message& msg) override;
+    void pack(tps::net::message<mqtt_header>& msg) override;
+    void unpack(tps::net::message<mqtt_header>& msg) override;
 };
 
 struct mqtt_publish: public mqtt_packet
@@ -213,8 +211,8 @@ struct mqtt_publish: public mqtt_packet
     uint16_t payloadlen;
     std::string payload;
 
-    void unpack(tps::net::message& msg) override;
-    void pack(tps::net::message& msg) override;
+    void unpack(tps::net::message<mqtt_header>& msg) override;
+    void pack(tps::net::message<mqtt_header>& msg) override;
 };
 
 struct mqtt_ack: public mqtt_packet
@@ -224,8 +222,8 @@ struct mqtt_ack: public mqtt_packet
     mqtt_ack(uint8_t _hdr, uint16_t _pkt_id): mqtt_packet(_hdr), pkt_id(_pkt_id){}
     uint16_t pkt_id;
 
-    void unpack(tps::net::message& msg) override;
-    void pack(tps::net::message& msg) override;
+    void unpack(tps::net::message<mqtt_header>& msg) override;
+    void pack(tps::net::message<mqtt_header>& msg) override;
 };
 
 typedef struct mqtt_ack mqtt_puback;
@@ -237,8 +235,8 @@ typedef union mqtt_header mqtt_pingreq;
 typedef union mqtt_header mqtt_pingresp;
 typedef union mqtt_header mqtt_disconnect;
 
-uint8_t mqtt_encode_length(tps::net::message &msg, size_t len);
-uint32_t mqtt_decode_length(tps::net::message &msg);
+uint8_t mqtt_encode_length(tps::net::message<mqtt_header> &msg, size_t len);
+uint32_t mqtt_decode_length(tps::net::message<mqtt_header> &msg);
 
 
 #endif // MQTT_H

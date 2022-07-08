@@ -3,9 +3,10 @@
 
 const uint8_t MAX_REMAINING_LENGTH_SIZE = 4;
 
-uint8_t mqtt_encode_length(tps::net::message& msg, size_t len)
+uint8_t mqtt_encode_length(tps::net::message<mqtt_header>& msg, size_t len)
 {
     uint8_t bytes = 0;
+    uint8_t* p = reinterpret_cast<uint8_t*>(&msg.hdr.size);
     do
     {
         if (bytes+1 > MAX_REMAINING_LENGTH_SIZE)
@@ -14,14 +15,13 @@ uint8_t mqtt_encode_length(tps::net::message& msg, size_t len)
         len /= 128;
         if (len > 0)
             d |= 128;
-        msg << d;
-        bytes++;
+        p[bytes++] = d;
     } while (len > 0);
 
     return bytes;
 }
 
-uint32_t mqtt_decode_length(tps::net::message& msg)
+uint32_t mqtt_decode_length(tps::net::message<mqtt_header>& msg)
 {
     uint32_t len = 0;
     uint8_t bytes = 0;
@@ -36,43 +36,41 @@ uint32_t mqtt_decode_length(tps::net::message& msg)
     return len;
 }
 
-std::shared_ptr<mqtt_packet> mqtt_packet::create(tps::net::message& msg)
+std::shared_ptr<mqtt_packet> mqtt_packet::create(tps::net::message<mqtt_header>& msg)
 {
-    mqtt_header hdr = {};
     std::shared_ptr<mqtt_packet> ret;
+    uint8_t byte = msg.hdr.byte.byte;
 
-    msg >> hdr.byte;
-
-    switch (hdr.byte >> 4)
+    switch (packet_type(byte >> 4))
     {
-        case CONNECT:
-            ret = create<mqtt_connect>(hdr.byte);
+        case packet_type::CONNECT:
+            ret = create<mqtt_connect>(byte);
             break;
-        case CONNACK:
-            ret = create<mqtt_connack>(hdr.byte);
+        case packet_type::CONNACK:
+            ret = create<mqtt_connack>(byte);
             break;
-        case SUBSCRIBE:
-            ret = create<mqtt_subscribe>(hdr.byte);
+        case packet_type::SUBSCRIBE:
+            ret = create<mqtt_subscribe>(byte);
             break;
-        case UNSUBSCRIBE:
-            ret = create<mqtt_unsubscribe>(hdr.byte);
+        case packet_type::UNSUBSCRIBE:
+            ret = create<mqtt_unsubscribe>(byte);
             break;
-        case SUBACK:
-            ret = create<mqtt_suback>(hdr.byte);
+        case packet_type::SUBACK:
+            ret = create<mqtt_suback>(byte);
             break;
-        case PUBLISH:
-            ret = create<mqtt_publish>(hdr.byte);
+        case packet_type::PUBLISH:
+            ret = create<mqtt_publish>(byte);
             break;
-        case PUBACK:
-        case PUBREC:
-        case PUBREL:
-        case PUBCOMP:
-            ret = create<mqtt_ack>(hdr.byte);
+        case packet_type::PUBACK:
+        case packet_type::PUBREC:
+        case packet_type::PUBREL:
+        case packet_type::PUBCOMP:
+            ret = create<mqtt_ack>(byte);
             break;
-        case PINGREQ:
-        case PINGRESP:
-        case DISCONNECT:
-            ret = create<mqtt_packet>(hdr.byte);
+        case packet_type::PINGREQ:
+        case packet_type::PINGRESP:
+        case packet_type::DISCONNECT:
+            ret = create<mqtt_packet>(byte);
             break;
         default:
             return nullptr;
@@ -80,17 +78,16 @@ std::shared_ptr<mqtt_packet> mqtt_packet::create(tps::net::message& msg)
     ret->unpack(msg);
 
     return ret;
+//    return packet_type(byte >> 4);
 }
 
-void mqtt_packet::unpack(tps::net::message& msg)
+void mqtt_packet::unpack(tps::net::message<mqtt_header>& msg)
 {
 
 }
 
-void mqtt_connect::unpack(tps::net::message& msg)
+void mqtt_connect::unpack(tps::net::message<mqtt_header>& msg)
 {
-    mqtt_decode_length(msg);
-
     uint16_t protocolLen = 0;
     msg >> protocolLen;
 
@@ -141,13 +138,11 @@ void mqtt_connect::unpack(tps::net::message& msg)
     }
 }
 
-void mqtt_subscribe::unpack(tps::net::message& msg)
+void mqtt_subscribe::unpack(tps::net::message<mqtt_header>& msg)
 {
-    uint32_t len = mqtt_decode_length(msg);
-
     msg >> pkt_id;
 
-    uint32_t remainingBytes = len - sizeof(pkt_id);
+    uint32_t remainingBytes = msg.hdr.size - sizeof(pkt_id);
 
     uint16_t count = 0;
     while (remainingBytes > 0)
@@ -165,13 +160,11 @@ void mqtt_subscribe::unpack(tps::net::message& msg)
     }
 }
 
-void mqtt_unsubscribe::unpack(tps::net::message& msg)
+void mqtt_unsubscribe::unpack(tps::net::message<mqtt_header>& msg)
 {
-    uint32_t len = mqtt_decode_length(msg);
-
     msg >> pkt_id;
 
-    uint32_t remainingBytes = len - sizeof(pkt_id);
+    uint32_t remainingBytes = msg.hdr.size - sizeof(pkt_id);
 
     uint16_t count = 0;
     while (remainingBytes > 0)
@@ -187,10 +180,8 @@ void mqtt_unsubscribe::unpack(tps::net::message& msg)
     }
 }
 
-void mqtt_publish::unpack(tps::net::message& msg)
+void mqtt_publish::unpack(tps::net::message<mqtt_header>& msg)
 {
-    uint32_t len = mqtt_decode_length(msg);
-
     msg >> topiclen;
 
     topic.resize(topiclen);
@@ -198,7 +189,7 @@ void mqtt_publish::unpack(tps::net::message& msg)
 
     // the len of msg contained in publish packet = packet len - (len of topic size + topic itself) +
     // + len of pkt id when qos level > 0
-    payloadlen = len - (sizeof(topiclen) + topiclen);
+    payloadlen = msg.hdr.size - (sizeof(topiclen) + topiclen);
     // pkt id is a variable field
     if (header.bits.qos > AT_MOST_ONCE)
     {
@@ -210,33 +201,29 @@ void mqtt_publish::unpack(tps::net::message& msg)
     msg >> payload;
 }
 
-void mqtt_suback::unpack(tps::net::message& msg)
+void mqtt_suback::unpack(tps::net::message<mqtt_header>& msg)
 {
-    uint32_t len = mqtt_decode_length(msg);
-
     msg >> pkt_id;
 
-    uint16_t rcsBytes = len - sizeof(pkt_id);
+    uint16_t rcsBytes = msg.hdr.size - sizeof(pkt_id);
     rcs.resize(rcsBytes);
     msg >> rcs;
 }
 
-void mqtt_ack::unpack(tps::net::message& msg)
+void mqtt_ack::unpack(tps::net::message<mqtt_header>& msg)
 {
-    mqtt_decode_length(msg);
-
     msg >> pkt_id;
 }
 
-void mqtt_packet::pack(tps::net::message& msg)
+void mqtt_packet::pack(tps::net::message<mqtt_header>& msg)
 {
-    msg << header.byte;
+    msg.hdr.byte = header.byte;
     mqtt_encode_length(msg, 0);
 }
 
-void mqtt_publish::pack(tps::net::message& msg)
+void mqtt_publish::pack(tps::net::message<mqtt_header>& msg)
 {
-    msg << header.byte;
+    msg.hdr.byte = header.byte;
     uint32_t remainingLen = sizeof(topiclen) +
                             topiclen + payloadlen;
     if (header.bits.qos > AT_MOST_ONCE)
@@ -250,27 +237,27 @@ void mqtt_publish::pack(tps::net::message& msg)
     msg << payload;
 }
 
-void mqtt_connack::pack(tps::net::message& msg)
+void mqtt_connack::pack(tps::net::message<mqtt_header>& msg)
 {
-    msg << header.byte;
+    msg.hdr.byte = header.byte;
     mqtt_encode_length(msg, sizeof(sp));
 
     msg << sp.byte;
     msg << rc;
 }
 
-void mqtt_suback::pack(tps::net::message& msg)
+void mqtt_suback::pack(tps::net::message<mqtt_header>& msg)
 {
-    msg << header.byte;
+    msg.hdr.byte = header.byte;
     mqtt_encode_length(msg, sizeof(pkt_id) + rcs.size());
 
     msg << pkt_id;
     msg << rcs;
 }
 
-void mqtt_ack::pack(tps::net::message& msg)
+void mqtt_ack::pack(tps::net::message<mqtt_header>& msg)
 {
-    msg << header.byte;
+    msg.hdr.byte = header.byte;
     mqtt_encode_length(msg, sizeof(pkt_id));
 
     msg << pkt_id;

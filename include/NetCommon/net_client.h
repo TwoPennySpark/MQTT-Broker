@@ -25,7 +25,7 @@ namespace tps
                 disconnect();
             }
 
-            bool Connect(const std::string& host, uint16_t port)
+            bool connect(const std::string& host, uint16_t port)
             {
                 try
                 {
@@ -68,13 +68,13 @@ namespace tps
                     return false;
             }
 
-            void send(const message& msg)
+            void send(const message<T>& msg)
             {
                 if (is_connected())
                     m_connection->send(msg);
             }
 
-            tsqueue<owned_message<T>>& Incoming()
+            tsqueue<owned_message<T>>& incoming()
             {
                 return m_qMessageIn;
             }

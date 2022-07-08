@@ -3,9 +3,8 @@
 #include "mqtt.h"
 #include "server.h"
 #include "NetCommon/net_message.h"
-#include "NetCommon/net_common.h"
-#include "NetCommon/net_server.h"
 
+/*
 void test_simple_pack_unpack()
 {
     tps::net::message msg;
@@ -94,7 +93,7 @@ void test_simple_pack_unpack()
 
 void test_mqtt_encode_decode_length()
 {
-    tps::net::message msg;
+    tps::net::message<T> msg;
 
     for (uint64_t len = 0; len < pow(2, 28)-1; len++)
     {
@@ -191,13 +190,15 @@ void tests()
 {
     test_simple_pack_unpack();
 //    test_mqtt_encode_decode_length();
-    test_pack_unpack();
+//    test_pack_unpack();
 }
+
+*/
 
 int main()
 {
 //    tests();
-    tps::net::server broker(5000);
+    server<mqtt_header> broker(5000);
     broker.start();
     broker.update();
 

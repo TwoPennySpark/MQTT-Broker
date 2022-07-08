@@ -4,22 +4,26 @@
 #include "net_common.h"
 #include "net_message.h"
 #include "net_tsqueue.h"
-#include "mqtt.h"
 
 namespace tps
 {
     namespace net
     {
-        class connection: public std::enable_shared_from_this<connection>
+        template <typename T>
+        class server_interface;
+
+        template <typename T>
+        class connection: public std::enable_shared_from_this<connection<T>>
         {
         public:
+
             enum class owner
             {
                 client,
                 server
             };
 
-            connection(owner parent, asio::io_context& asioContext, asio::ip::tcp::socket socket, tsqueue<owned_message>& qIn):
+            connection(owner parent, asio::io_context& asioContext, asio::ip::tcp::socket socket, tsqueue<owned_message<T>>& qIn):
                        m_nOwnerType(parent), m_asioContext(asioContext), m_socket(std::move(socket)), m_qMessageIn(qIn)
             {
 
@@ -30,14 +34,15 @@ namespace tps
 
             }
 
-            void connect_to_client(uint32_t uid = 0)
+            void connect_to_client(uint32_t uid, server_interface<T>* server)
             {
                 if (m_nOwnerType == owner::server)
                 {
                     if (m_socket.is_open())
                     {
                         m_id = uid;
-                        read_header();
+
+                        read_first_hdr(server);
                     }
                 }
             }
@@ -79,7 +84,7 @@ namespace tps
             }
 
             // ASYNC
-            void send(const message& msg)
+            void send(const message<T>& msg)
             {
                 asio::post(m_asioContext, [this, msg]()
                 {
@@ -93,7 +98,7 @@ namespace tps
             class decode_len_t
             {
             public:
-                decode_len_t(message& _m_msgTempIn): m_msgTempIn(_m_msgTempIn){}
+                decode_len_t(message<T>& _m_msgTempIn): m_msgTempIn(_m_msgTempIn){}
 
                 std::size_t operator()(const std::error_code& ec, std::size_t)
                 {
@@ -125,10 +130,10 @@ namespace tps
                 }
 
             private:
-                message& m_msgTempIn;
+                message<T>& m_msgTempIn;
             };
 
-            inline decode_len_t decode_len(message& m_msgTempIn)
+            inline decode_len_t decode_len(message<T>& m_msgTempIn)
             {
                 return decode_len_t(m_msgTempIn);
             }
@@ -143,10 +148,11 @@ namespace tps
                         {
                             if (m_msgTempIn.hdr.size > 0)
                             {
+                                printf("HDR:%x SIZE:%x %d\n", m_msgTempIn.hdr.byte.byte, m_msgTempIn.hdr.size, m_msgTempIn.hdr.size);
                                 m_msgTempIn.body.resize(m_msgTempIn.hdr.size);
-//                                read_body();
-                                memset(&m_msgTempIn.hdr, 0, sizeof(m_msgTempIn.hdr));
-                                read_header();
+                                read_body();
+//                                memset(&m_msgTempIn.hdr, 0, sizeof(m_msgTempIn.hdr));
+//                                read_header();
                             }
                             else
                             {
@@ -165,12 +171,10 @@ namespace tps
             void read_body()
             {
                 asio::async_read(m_socket, asio::buffer(m_msgTempIn.body.data(), m_msgTempIn.body.size()),
-                    [this](const std::error_code& ec, std::size_t length)
+                    [this](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
-                            std::cout << "BODY LEN:" << length
-                                      << ":" << m_msgTempIn.body.size() << "\n";
                             add_to_incoming_message_queue();
                         }
                         else
@@ -184,7 +188,7 @@ namespace tps
             // ASYNC
             void write_header()
             {
-                asio::async_write(m_socket, asio::buffer(&m_qMessageOut.front().hdr, sizeof(message_header)),
+                asio::async_write(m_socket, asio::buffer(&m_qMessageOut.front().hdr, sizeof(message_header<T>)),
                     [this](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
@@ -231,23 +235,66 @@ namespace tps
             void add_to_incoming_message_queue()
             {
                 if (m_nOwnerType == owner::server)
-                    m_qMessageIn.push_back({this->shared_from_this(), m_msgTempIn}); // server has an array of connections, so it needs to know which connection owns incoming message
+                    m_qMessageIn.push_back({this->shared_from_this(), m_msgTempIn}); // server has an array of connections, so it needs to know which connection owns incoming message<T>
                 else
                     m_qMessageIn.push_back({nullptr, m_msgTempIn}); // client has only 1 connection, this connection will own all of incoming msgs
 
                 read_header();
             }
 
-        protected:
+            // ASYNC
+            void read_first_hdr(server_interface<T>* server)
+            {
+                asio::async_read(m_socket, asio::buffer(&m_msgTempIn.hdr, sizeof(m_msgTempIn.hdr)+1), decode_len(m_msgTempIn),
+                    [this, server](const std::error_code& ec, std::size_t)
+                    {
+                        if (!ec)
+                        {
+                            if (m_msgTempIn.hdr.size > 0)
+                            {
+                                printf("HDR:%x SIZE:%x %d\n", m_msgTempIn.hdr.byte.byte,
+                                       m_msgTempIn.hdr.size, m_msgTempIn.hdr.size);
+                                m_msgTempIn.body.resize(m_msgTempIn.hdr.size);
+                                read_first_body(server);
+                            }
+                        }
+                        else
+                        {
+                            std::cout << "[" << m_id << "] Read First Header Fail: " << ec.message() << "\n";
+                            m_socket.close();
+                        }
+                    });
+            }
+
+            // ASYNC
+            void read_first_body(server_interface<T>* server)
+            {
+                asio::async_read(m_socket, asio::buffer(m_msgTempIn.body.data(), m_msgTempIn.body.size()),
+                    [this, server](const std::error_code& ec, std::size_t)
+                    {
+                        if (!ec)
+                        {
+                            if (server->on_first_message(this->shared_from_this(), m_msgTempIn))
+                                read_header();
+                        }
+                        else
+                        {
+                            std::cout << "[" << m_id << "] Read First Body Fail\n";
+                            m_socket.close();
+                        }
+                    });
+            }
+
+        private:
             asio::ip::tcp::socket m_socket;
 
             asio::io_context& m_asioContext;
 
-            tsqueue<message> m_qMessageOut;
+            tsqueue<message<T>> m_qMessageOut;
 
-            tsqueue<owned_message>& m_qMessageIn;
+            tsqueue<owned_message<T>>& m_qMessageIn;
 
-            message m_msgTempIn;
+            message<T> m_msgTempIn;
 
             owner m_nOwnerType = owner::server;
 

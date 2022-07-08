@@ -1,25 +1,26 @@
 #ifndef NET_SERVER_H
 #define NET_SERVER_H
 
-#include "NetCommon/net_common.h"
-#include "NetCommon/net_connection.h"
-#include "NetCommon/net_message.h"
-#include "NetCommon/net_tsqueue.h"
+#include "net_common.h"
+#include "net_connection.h"
+#include "net_message.h"
+#include "net_tsqueue.h"
 
 namespace tps
 {
     namespace net
     {
-        class server
+        template <typename T>
+        class server_interface
         {
         public:
-            server(uint16_t port) :
+            server_interface(uint16_t port) :
                 m_asioAcceptor(m_asioContext, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port))
             {
 
             }
 
-            ~server()
+            ~server_interface()
             {
                 stop();
             }
@@ -59,14 +60,14 @@ namespace tps
                     if (!ec)
                     {
                         std::cout << "[SERVER] New connection: " << socket.remote_endpoint() << std::endl;
-                        std::shared_ptr<connection> newconn = std::make_shared<connection>(
-                                    connection::owner::server, m_asioContext, std::move(socket), m_qMessagesIn);
+                        std::shared_ptr<connection<T>> newconn = std::make_shared<connection<T>>(
+                                    connection<T>::owner::server, m_asioContext, std::move(socket), m_qMessagesIn);
 
                         if (on_client_connect(newconn))
                         {
                             m_deqConnections.push_back(std::move(newconn));
 
-                            m_deqConnections.back()->connect_to_client(nIDCounter++);
+                            m_deqConnections.back()->connect_to_client(nIDCounter++, this);
 
                             std::cout << "[" << m_deqConnections.back()->get_ID() << "] Connection approved\n";
                         }
@@ -84,9 +85,9 @@ namespace tps
                 });
             }
 
-            void message_client(std::shared_ptr<connection> client, const message& msg)
+            void message_client(std::shared_ptr<connection<T>> client, const message<T>& msg)
             {
-                if (client && client->is_connected()) // Check every time?
+                if (client && client->is_connected())
                 {
                     client->send(msg);
                 }
@@ -99,7 +100,7 @@ namespace tps
                 }
             }
 
-            void message_all_clients(const message& msg, std::shared_ptr<connection> pIgnoreClient = nullptr)
+            void message_all_clients(const message<T>& msg, std::shared_ptr<connection<T>> pIgnoreClient = nullptr)
             {
                 bool bInvalidClientExists = false;
 
@@ -137,29 +138,37 @@ namespace tps
             }
 
         protected:
-            bool on_client_connect(std::shared_ptr<connection> client)
+            virtual bool on_client_connect(std::shared_ptr<connection<T>> client)
             {
                 return true;
             }
 
-            void on_client_disconnect(std::shared_ptr<connection> client)
+            virtual void on_client_disconnect(std::shared_ptr<connection<T>> client)
             {
 
             }
 
-            void on_message(std::shared_ptr<connection> client, message& msg)
+            virtual void on_message(std::shared_ptr<connection<T>> client, message<T>& msg)
             {
 
             }
 
-            tsqueue<owned_message> m_qMessagesIn;
+        public:
+            virtual bool on_first_message(std::shared_ptr<connection<T>> client, message<T>& msg)
+            {
+
+            }
+
+        protected:
+
+            tsqueue<owned_message<T>> m_qMessagesIn;
 
             asio::io_context m_asioContext;
             std::thread m_threadContext;
 
             asio::ip::tcp::acceptor m_asioAcceptor;
 
-            std::deque<std::shared_ptr<connection>> m_deqConnections;
+            std::deque<std::shared_ptr<connection<T>>> m_deqConnections;
 
             uint32_t nIDCounter = 10000;
         };

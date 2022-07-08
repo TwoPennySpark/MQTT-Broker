@@ -4,12 +4,7 @@
 #include "core.h"
 #include "trie.h"
 
-//static int compare_cid(void *c1, void *c2) {
-//    return strcmp(((struct subscriber *) c1)->client->client_id,
-//                  ((struct subscriber *) c2)->client->client_id);
-//}
-
-void topic::add_subscriber(struct sol_client* client,
+void topic::add_subscriber(struct client* client,
                           struct subscriber* sub,
                           bool cleansession)
 {
@@ -21,21 +16,21 @@ void topic::add_subscriber(struct sol_client* client,
 
 }
 
-void topic::del_subscriber(struct sol_client *client,
+void topic::del_subscriber(struct client *client,
                           bool cleansession)
 {
     // TODO test this out in usub handler
-    for (auto it = subscribers.begin(); it != subscribers.end(); it++)
-        if (it->get()->client == client)
-        {
-            subscribers.erase(it);
-            printf("SUBSCRIBER DELETED\n");
-            break;
-        }
+//    for (auto it = subscribers.begin(); it != subscribers.end(); it++)
+//        if (it->get()->client == client)
+//        {
+//            subscribers.erase(it);
+//            printf("SUBSCRIBER DELETED\n");
+//            break;
+//        }
     // TODO remomve in case of cleansession == false
 }
 
-sol_client::~sol_client()
+client::~client()
 {
     // reach every topic and delete this client subscription
     for (auto el: session.subscriptions)
@@ -43,6 +38,5 @@ sol_client::~sol_client()
         el->del_subscriber(this, session.cleansession);
         el.reset();
     }
-    cb.reset();
     printf("CLIENT DELETED\n");
 }

@@ -2,23 +2,24 @@
 #define NET_MESSAGE_H
 
 #include "net_common.h"
-#include "mqtt.h"
 
 namespace tps
 {
     namespace net
     {
         #pragma pack(push,1)
+        template <typename T>
         struct message_header
         {
-            mqtt_header byte;
+            T byte;
             uint32_t size = 0;
         };
         #pragma pack(pop)
 
+        template <typename T>
         struct message
         {
-            message_header hdr{};
+            message_header<T> hdr{};
             std::vector<uint8_t> body;
 
             size_t size() const
@@ -116,12 +117,14 @@ namespace tps
             uint32_t m_start = 0, m_end = 0;
         };
 
+        template <typename T>
         class connection;
 
+        template <typename T>
         struct owned_message
         {
-            std::shared_ptr<connection> owner = nullptr;
-            message msg;
+            std::shared_ptr<connection<T>> owner = nullptr;
+            message<T> msg;
         };
     }
 }

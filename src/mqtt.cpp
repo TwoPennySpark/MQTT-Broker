@@ -240,7 +240,7 @@ void mqtt_publish::pack(tps::net::message<mqtt_header>& msg)
 void mqtt_connack::pack(tps::net::message<mqtt_header>& msg)
 {
     msg.hdr.byte = header.byte;
-    mqtt_encode_length(msg, sizeof(sp));
+    msg.hdr.bytesSize = mqtt_encode_length(msg, sizeof(sp));
 
     msg << sp.byte;
     msg << rc;

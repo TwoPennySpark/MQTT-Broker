@@ -7,11 +7,17 @@
 #include <memory>
 #include "trie.h"
 #include "mqtt.h"
+#include "NetCommon/net_connection.h"
 
 struct topic;
 
 struct session
 {
+    void clear()
+    {
+        subscriptions.clear();
+    }
+
     bool cleansession;
     std::list<std::shared_ptr<topic>> subscriptions;
     // TODO add pending confirmed messages
@@ -24,6 +30,7 @@ struct session
 typedef struct client
 {
     ~client();
+    bool active;
     std::string clientID;
     struct session session;
 
@@ -37,6 +44,7 @@ typedef struct client
     std::string password;
 
     uint16_t keepalive;
+    std::shared_ptr<tps::net::connection<mqtt_header>> netClient;
 }client_t;
 
 struct subscriber
@@ -80,7 +88,7 @@ struct topic
 struct core
 {
     trie<topic> topics;
-    std::unordered_map<std::string, std::shared_ptr<client>> clients;
+    std::unordered_map<std::string, std::shared_ptr<client_t>> clients;
 };
 
 #endif // CORE_H

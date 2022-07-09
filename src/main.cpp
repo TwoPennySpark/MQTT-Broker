@@ -2,6 +2,7 @@
 #include <math.h>
 #include "mqtt.h"
 #include "server.h"
+#include "NetCommon/net_client.h"
 #include "NetCommon/net_message.h"
 
 /*
@@ -195,13 +196,92 @@ void tests()
 
 */
 
+template <typename T>
+class MQTTClient: public tps::net::client_interface<T>
+{
+public:
+    void pack_connect(mqtt_connect& con, tps::net::message<mqtt_header>& msg)
+    {
+        msg.hdr.byte.bits.type = con.header.bits.type;
+        msg.hdr.bytesSize = mqtt_encode_length(msg, 12+con.payload.client_id.size());
+
+        std::string protocolName = "MQTT";
+        uint16_t protocolLen = protocolName.size();
+        msg << protocolLen;
+        msg << protocolName;
+
+        uint8_t protocolLevel = 4;
+        msg << protocolLevel;
+
+        mqtt_connect::variable_header vhdr(0);
+        vhdr.bits.clean_session = con.vhdr.bits.clean_session;
+        msg << vhdr;
+
+        uint16_t keepalive = con.payload.keepalive;
+        msg << keepalive;
+
+        uint16_t clientIDLen = con.payload.client_id.size();
+        msg << clientIDLen;
+        msg << con.payload.client_id;
+    }
+
+    void unpack_connack(tps::net::message<mqtt_header>& msg, mqtt_connack& con)
+    {
+        con.header.byte = msg.hdr.byte.byte;
+        msg >> con.sp.byte;
+        msg >> con.rc;
+    }
+};
+
+//#define CLIENT
+
 int main()
 {
 //    tests();
+#ifdef CLIENT
+    MQTTClient<mqtt_header> client;
+    client.connect("127.0.0.1", 5000);
+
+//    getchar();
+    mqtt_connect con(0);
+    con.header.bits.type = 1;
+    con.vhdr.bits.clean_session = 1;
+    con.payload.keepalive = 0xffff;
+    con.payload.client_id = "foo";
+
+    tps::net::message<mqtt_header>conmsg;
+    client.pack_connect(con, conmsg);
+    client.send(conmsg);
+
+    while (1)
+    {
+        if (client.is_connected())
+        {
+            if (!client.incoming().empty())
+            {
+                tps::net::message<mqtt_header> msg = client.incoming().pop_front().msg;
+                switch (packet_type(msg.hdr.byte.bits.type))
+                {
+                    case packet_type::CONNACK:
+                    {
+                        mqtt_connack resp(0);
+                        client.unpack_connack(msg, resp);
+                        printf("SP:%d RC:%d\n", resp.sp.bits.session_present, resp.rc);
+                        break;
+                    }
+                    default:
+                        std::cout << "DEFAULT: " << msg.hdr.byte.bits.type << "\n";
+                        break;
+                }
+            }
+        }
+        sleep(1);
+    }
+#else
     server<mqtt_header> broker(5000);
     broker.start();
     broker.update();
-
+#endif
     std::cout << "END\n";
     return 0;
 }

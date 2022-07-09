@@ -188,7 +188,8 @@ namespace tps
             // ASYNC
             void write_header()
             {
-                asio::async_write(m_socket, asio::buffer(&m_qMessageOut.front().hdr, sizeof(message_header<T>)),
+                asio::async_write(m_socket, asio::buffer(&m_qMessageOut.front().hdr,
+                                                         sizeof(T) + m_qMessageOut.front().hdr.bytesSize),
                     [this](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
@@ -252,10 +253,15 @@ namespace tps
                         {
                             if (m_msgTempIn.hdr.size > 0)
                             {
-                                printf("HDR:%x SIZE:%x %d\n", m_msgTempIn.hdr.byte.byte,
+                                printf("RFH HDR:%x SIZE:%x %d\n", m_msgTempIn.hdr.byte.byte,
                                        m_msgTempIn.hdr.size, m_msgTempIn.hdr.size);
                                 m_msgTempIn.body.resize(m_msgTempIn.hdr.size);
                                 read_first_body(server);
+                            }
+                            else
+                            {
+                                if (server->on_first_message(this->shared_from_this(), m_msgTempIn))
+                                    add_to_incoming_message_queue();
                             }
                         }
                         else
@@ -275,7 +281,12 @@ namespace tps
                         if (!ec)
                         {
                             if (server->on_first_message(this->shared_from_this(), m_msgTempIn))
-                                read_header();
+                                add_to_incoming_message_queue();
+                            else
+                            {
+                                std::cout << "[" << m_id << "] Invalid First Msg Received\n";
+                                m_socket.close();
+                            }
                         }
                         else
                         {

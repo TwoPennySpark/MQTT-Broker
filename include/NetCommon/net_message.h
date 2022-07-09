@@ -13,6 +13,7 @@ namespace tps
         {
             T byte;
             uint32_t size = 0;
+            uint8_t bytesSize = 0;
         };
         #pragma pack(pop)
 

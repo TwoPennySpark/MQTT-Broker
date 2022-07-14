@@ -68,10 +68,11 @@ namespace tps
                     return false;
             }
 
-            void send(const message<T>& msg)
+            template <typename Type>
+            void send(Type&& msg)
             {
                 if (is_connected())
-                    m_connection->send(msg);
+                    m_connection->send(std::forward<Type>(msg));
             }
 
             tsqueue<owned_message<T>>& incoming()

@@ -203,7 +203,7 @@ public:
     void pack_connect(mqtt_connect& con, tps::net::message<mqtt_header>& msg)
     {
         msg.hdr.byte.bits.type = con.header.bits.type;
-        msg.hdr.bytesSize = mqtt_encode_length(msg, 12+con.payload.client_id.size());
+        msg.writeHdrSize += mqtt_encode_length(msg, 12+con.payload.client_id.size());
 
         std::string protocolName = "MQTT";
         uint16_t protocolLen = protocolName.size();
@@ -233,25 +233,26 @@ public:
     }
 };
 
-//#define CLIENT
+#define CLIENT
 
 int main()
 {
 //    tests();
+    std::cout << "[" << std::this_thread::get_id() << "]MAIN THREAD\n";
+
 #ifdef CLIENT
     MQTTClient<mqtt_header> client;
     client.connect("127.0.0.1", 5000);
 
-//    getchar();
     mqtt_connect con(0);
     con.header.bits.type = 1;
     con.vhdr.bits.clean_session = 1;
-    con.payload.keepalive = 0xffff;
     con.payload.client_id = "foo";
+    con.payload.keepalive = 0xffff;
 
     tps::net::message<mqtt_header>conmsg;
     client.pack_connect(con, conmsg);
-    client.send(conmsg);
+    client.send(std::move(conmsg));
 
     while (1)
     {
@@ -259,7 +260,9 @@ int main()
         {
             if (!client.incoming().empty())
             {
+                std::cout << "[" << std::this_thread::get_id() << "]MAIN POP BEFORE\n";
                 tps::net::message<mqtt_header> msg = client.incoming().pop_front().msg;
+                std::cout << "[" << std::this_thread::get_id() << "]MAIN POP AFTER\n";
                 switch (packet_type(msg.hdr.byte.bits.type))
                 {
                     case packet_type::CONNACK:

@@ -85,11 +85,14 @@ namespace tps
                 });
             }
 
-            void message_client(std::shared_ptr<connection<T>> client, const message<T>& msg)
+            template <typename Type>
+            void message_client(std::shared_ptr<connection<T>> client, Type&& msg)
             {
                 if (client && client->is_connected())
                 {
-                    client->send(msg);
+                    std::cout << "[" << std::this_thread::get_id() << "]message_client BEFORE\n";
+                    client->send(std::forward<Type>(msg));
+                    std::cout << "[" << std::this_thread::get_id() << "]message_client AFTER\n";
                 }
                 else
                 {

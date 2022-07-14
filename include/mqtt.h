@@ -58,6 +58,10 @@ union mqtt_header
     mqtt_header(uint8_t _byte): byte(_byte) {}
     mqtt_header(uint8_t _retain, uint8_t _qos, uint8_t _dup, uint8_t _type): bits(_retain, _qos, _dup, _type){}
 
+    mqtt_header(const mqtt_header& _hdr): byte(_hdr.byte) {}
+    mqtt_header& operator=(const mqtt_header& _hdr) {byte = _hdr.byte; return *this;}
+    mqtt_header(mqtt_header&& _hdr): byte(_hdr.byte) {_hdr.byte = 0;}
+
     uint8_t byte;
     struct hdr
     {

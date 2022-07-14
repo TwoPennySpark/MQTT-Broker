@@ -11,9 +11,16 @@ namespace tps
         template <typename T>
         struct message_header
         {
+            message_header() = default;
+
+            message_header(message_header& _hdr): byte(_hdr.byte), size(_hdr.size) {std::cout << "COPYC\n";}
+            message_header(const message_header& _hdr): byte(_hdr.byte), size(_hdr.size) {std::cout << "[" << std::this_thread::get_id() << "]=COPYCC\n";}
+            message_header& operator=(const message_header& _hdr) {std::cout << "COPYA\n";byte = _hdr.byte; _hdr.byte = 0; size = _hdr.size; _hdr.size = 0; return *this;}
+
+            message_header(message_header&& _hdr): byte(_hdr.byte), size(_hdr.size) {std::cout << "[" << std::this_thread::get_id() << "]=MOVEC\n";_hdr.byte = 0; _hdr.size = 0;}
+
             T byte;
             uint32_t size = 0;
-            uint8_t bytesSize = 0;
         };
         #pragma pack(pop)
 
@@ -21,6 +28,7 @@ namespace tps
         struct message
         {
             message_header<T> hdr{};
+            uint8_t writeHdrSize = sizeof(T);
             std::vector<uint8_t> body;
 
             size_t size() const

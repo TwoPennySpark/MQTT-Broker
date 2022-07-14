@@ -147,7 +147,7 @@ private:
         tps::net::message<T> reply;
         connack.rc = 0;
         connack.pack(reply);
-        this->message_client(netClient, reply);
+        this->message_client(netClient, std::move(reply));
     }
 
     struct core core;

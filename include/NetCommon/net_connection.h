@@ -84,15 +84,19 @@ namespace tps
             }
 
             // ASYNC
-            void send(const message<T>& msg)
+            template <typename Type>
+            void send(Type&& msg)
             {
-                asio::post(m_asioContext, [this, msg]()
+                std::cout << "[" << std::this_thread::get_id() << "]SEND BEFORE\n";
+                asio::post(m_asioContext, [this, msg = std::forward<Type>(msg)]() mutable
                 {
+                    printf("SEND %d header bytes + 0x%x body bytes: HDR:0x%x\n", msg.writeHdrSize, msg.hdr.size, msg.hdr.byte.byte);
                     bool bWritingMessage = !m_qMessageOut.empty();
-                    m_qMessageOut.push_back(msg);
+                    m_qMessageOut.push_back(std::forward<Type>(msg));
                     if (!bWritingMessage)
                         write_header();
                 });
+                std::cout << "[" << std::this_thread::get_id() << "]SEND AFTER\n";
             }
 
             class decode_len_t
@@ -100,10 +104,12 @@ namespace tps
             public:
                 decode_len_t(message<T>& _m_msgTempIn): m_msgTempIn(_m_msgTempIn){}
 
-                std::size_t operator()(const std::error_code& ec, std::size_t)
+                std::size_t operator()(const std::error_code& ec, std::size_t size)
                 {
                     static uint32_t len = 0;
                     static uint8_t lenIndex = 0;
+
+                    printf("DECODE:%d %d %d\n", size, m_msgTempIn.hdr.byte.byte, m_msgTempIn.hdr.size);
 
                     if (ec)
                         return 0;
@@ -148,7 +154,7 @@ namespace tps
                         {
                             if (m_msgTempIn.hdr.size > 0)
                             {
-                                printf("HDR:%x SIZE:%x %d\n", m_msgTempIn.hdr.byte.byte, m_msgTempIn.hdr.size, m_msgTempIn.hdr.size);
+                                printf("HDR:%x SIZE:%x\n", m_msgTempIn.hdr.byte.byte, m_msgTempIn.hdr.size);
                                 m_msgTempIn.body.resize(m_msgTempIn.hdr.size);
                                 read_body();
 //                                memset(&m_msgTempIn.hdr, 0, sizeof(m_msgTempIn.hdr));
@@ -171,10 +177,11 @@ namespace tps
             void read_body()
             {
                 asio::async_read(m_socket, asio::buffer(m_msgTempIn.body.data(), m_msgTempIn.body.size()),
-                    [this](const std::error_code& ec, std::size_t)
+                    [this](const std::error_code& ec, std::size_t len)
                     {
                         if (!ec)
                         {
+                            printf("READ BODY:%ld\n", len);
                             add_to_incoming_message_queue();
                         }
                         else
@@ -189,7 +196,7 @@ namespace tps
             void write_header()
             {
                 asio::async_write(m_socket, asio::buffer(&m_qMessageOut.front().hdr,
-                                                         sizeof(T) + m_qMessageOut.front().hdr.bytesSize),
+                                                         m_qMessageOut.front().writeHdrSize),
                     [this](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
@@ -235,11 +242,14 @@ namespace tps
 
             void add_to_incoming_message_queue()
             {
-                if (m_nOwnerType == owner::server)
-                    m_qMessageIn.push_back({this->shared_from_this(), m_msgTempIn}); // server has an array of connections, so it needs to know which connection owns incoming message<T>
-                else
-                    m_qMessageIn.push_back({nullptr, m_msgTempIn}); // client has only 1 connection, this connection will own all of incoming msgs
+                std::cout << "[" << std::this_thread::get_id() << "]add_to_incoming_message_queue BEFORE\n";
 
+                if (m_nOwnerType == owner::server)
+                    m_qMessageIn.push_back(owned_message<T>({this->shared_from_this(), std::move(m_msgTempIn)})); // server has an array of connections, so it needs to know which connection owns incoming message<T>
+                else
+                    m_qMessageIn.push_back(owned_message<T>({nullptr, std::move(m_msgTempIn)})); // client has only 1 connection, this connection will own all of incoming msgs
+
+                std::cout << "[" << std::this_thread::get_id() << "]add_to_incoming_message_queue AFTER\n";
                 read_header();
             }
 
@@ -261,7 +271,14 @@ namespace tps
                             else
                             {
                                 if (server->on_first_message(this->shared_from_this(), m_msgTempIn))
+                                {
                                     add_to_incoming_message_queue();
+                                }
+                                else
+                                {
+                                    std::cout << "[" << m_id << "] Invalid First Msg Received\n";
+                                    m_socket.close();
+                                }
                             }
                         }
                         else
@@ -276,12 +293,15 @@ namespace tps
             void read_first_body(server_interface<T>* server)
             {
                 asio::async_read(m_socket, asio::buffer(m_msgTempIn.body.data(), m_msgTempIn.body.size()),
-                    [this, server](const std::error_code& ec, std::size_t)
+                    [this, server](const std::error_code& ec, std::size_t len)
                     {
                         if (!ec)
                         {
+                            printf("RFBODY:%ld\n", len);
                             if (server->on_first_message(this->shared_from_this(), m_msgTempIn))
+                            {
                                 add_to_incoming_message_queue();
+                            }
                             else
                             {
                                 std::cout << "[" << m_id << "] Invalid First Msg Received\n";

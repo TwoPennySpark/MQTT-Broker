@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <vector>
+#include <functional>
 
 #define ALPHABET_SIZE 96
 
@@ -10,6 +11,13 @@ template<typename T>
 struct trie_node
 {
     trie_node() {children.reserve(ALPHABET_SIZE); children_num = 0;}
+    ~trie_node()
+    {
+        for (auto child: children)
+            if (child)
+                child.reset();
+        data.reset();
+    }
     std::vector<std::shared_ptr<trie_node>> children; // next symbols in topic name
     uint16_t children_num; // number of non-empty spots in children array
     std::shared_ptr<T> data;  // topic structure, contains subscribers info
@@ -42,9 +50,9 @@ public:
         cursor->data = data;
     }
 
-    trie_node<T>* find(const std::string& prefix)
+    trie_node<T>* find(const std::string& prefix, trie_node<T>* start = nullptr)
     {
-        trie_node<T>* retnode = &root;
+        trie_node<T>* retnode = start ? start : &root;
 
         // Move to the end of the prefix first
         for (auto key: prefix)
@@ -60,17 +68,30 @@ public:
         return retnode;
     }
 
-    // apply function 'func' with argument 'arg' to perfix node and all prefix's children
-    void apply_func(const std::string &prefix, void (*func)(trie_node<T> *, void *), void* arg)
+    // apply function 'func' to perfix node and all prefix's children
+    void apply_func(const std::string &prefix, std::function<void(trie_node<T> *)> func)
     {
         if (prefix.size())
         {
             trie_node<T> *node = find(prefix);
             if (node)
-                recursive_apply_func(node, func, arg);
+                recursive_apply_func(node, func);
         }
         else
-            recursive_apply_func(&root, func, arg);
+            recursive_apply_func(&root, func);
+    }
+
+    // look for occurences of 'key', starting from 'start'+'prefix' node, and apply function 'func' to them
+    void apply_func_key(const std::string &prefix, trie_node<T>* start, char until, std::function<void(trie_node<T> *)> func)
+    {
+        if (prefix.size())
+        {
+            trie_node<T> *node = find(prefix, start);
+            if (node)
+                recursive_apply_func_key(node, until, func);
+        }
+        else
+            recursive_apply_func_key(&root, until, func);
     }
 
     void erase(const std::string& prefix)
@@ -107,10 +128,10 @@ private:
         return false;
     }
 
-    void recursive_apply_func(trie_node<T> *node, void (*func)(trie_node<T> *, void *), void* arg)
+    void recursive_apply_func(trie_node<T> *node, std::function<void(trie_node<T> *)> func)
     {
         if (node->data)
-            func(node, arg);
+            func(node);
 
         uint child_num = node->children_num;
         for (uint i = 0; i < ALPHABET_SIZE && child_num; i++)
@@ -119,7 +140,24 @@ private:
             {
                 trie_node<T>* child = node->children[i].get();
                 child_num--;
-                recursive_apply_func(child, func, arg);
+                recursive_apply_func(child, func);
+            }
+        }
+    }
+
+    void recursive_apply_func_key(trie_node<T> *node, char key, std::function<void(trie_node<T> *)> func)
+    {
+        uint child_num = node->children_num;
+        for (uint i = 0; i < ALPHABET_SIZE && child_num; i++)
+        {
+            if (node->children[i])
+            {
+                trie_node<T>* child = node->children[i].get();
+                child_num--;
+                if (i != key-32)
+                    recursive_apply_func_key(child, key, func);
+                else
+                    func(child);
             }
         }
     }

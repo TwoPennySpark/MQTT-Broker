@@ -90,9 +90,9 @@ namespace tps
             {
                 if (client && client->is_connected())
                 {
-                    std::cout << "[" << std::this_thread::get_id() << "]message_client BEFORE\n";
+//                    std::cout << "[" << std::this_thread::get_id() << "]message_client BEFORE\n";
                     client->send(std::forward<Type>(msg));
-                    std::cout << "[" << std::this_thread::get_id() << "]message_client AFTER\n";
+//                    std::cout << "[" << std::this_thread::get_id() << "]message_client AFTER\n";
                 }
                 else
                 {

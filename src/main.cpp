@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <math.h>
+#include <boost/algorithm/string.hpp>
 #include "mqtt.h"
 #include "server.h"
 #include "NetCommon/net_client.h"
@@ -186,15 +187,230 @@ void test_pack_unpack()
         assert(pkt0.pkt_id == pkt1->pkt_id);
     }
 }
+*/
+
+
+/*
+============================================
+    '#' - multi-level wildcard
+
+    For example, if a Client subscribes to “sport/tennis/player1/#”, it would receive
+    messages published using these topic names:
+
+·         “sport/tennis/player1”
+·         “sport/tennis/player1/ranking”
+·         “sport/tennis/player1/score/wimbledon”
+
+    Other examples:
+
+·         “sport/#” also matches the singular “sport”, since # includes the parent level.
+·         “#” is valid and will receive every Application Message
+·         “sport/tennis/#” is valid
+·         “sport/tennis#” is not valid
+·         “sport/tennis/#/ranking” is not valid
+
+============================================
+    '+' - single level wildcard
+
+    For example, “sport/tennis/+” matches:
+·         “sport/tennis/player1”
+·         “sport/tennis/player2”,
+·         but not “sport/tennis/player1/ranking”.
+
+    Also, because the single-level wildcard matches only a single level,
+    “sport/+” does not match “sport” but it does match “sport/”.
+
+·         “+” is valid
+·         “+/tennis/#” is valid
+·         “sport+” is not valid
+·         “sport/+/player1” is valid
+·         “/finance” matches “+/+” and “/+”, but not “+”
+============================================
+*/
+
+std::vector<std::shared_ptr<topic_t>> get_matching_topics(trie<topic_t>& topics, const std::string &topicFilter)
+{
+    std::vector<std::shared_ptr<topic_t>> matches;
+    std::string prefix = "";
+
+    bool multilvl = false;
+    // if there is a '#' wildcard
+    if (topicFilter.find("#") != std::string::npos)
+    {
+        // '#' is last symbol
+        if (topicFilter[topicFilter.length()-1] == '#')
+        {
+            // if topicFilter == "#"
+            if (topicFilter.length() == 1)
+            {
+                // every topic is a match
+                topics.apply_func(prefix, [&prefix, &matches](trie_node<topic_t>* t)
+                {
+                    if (t->data->name == prefix)
+                        return;
+
+                    matches.push_back(t->data);
+                });
+                return matches;
+            }
+            multilvl = true;
+        }
+        else
+        {// ERROR: '#' is not last symbol
+            return matches;
+        }
+    }
+
+    if (topicFilter.find("+") != std::string::npos)
+    {
+        std::vector<boost::iterator_range<std::string::const_iterator>> singlelvl;
+        boost::find_all(singlelvl, topicFilter, "/+");
+//        if (topicFilter[0] == '+')
+//            singlelvl.emplace(singlelvl.cbegin(),
+//                              boost::iterator_range<std::string::const_iterator>(topicFilter.cbegin(), topicFilter.cbegin()+1));
+
+        std::vector<trie_node<topic_t>*> matchesSoFar;
+
+        if (topicFilter[0] == '+')
+        {
+            topics.apply_func_key(prefix, nullptr, '/',
+                [&matchesSoFar](trie_node<topic_t>* n)
+            {
+                matchesSoFar.push_back(n);
+            });
+        }
+
+        auto start = topicFilter.cbegin();
+        auto end = singlelvl[0].begin();
+        prefix = std::string(start, end+1);
+        topics.apply_func_key(prefix, nullptr, '/',
+            [&matchesSoFar](trie_node<topic_t>* n)
+        {
+            matchesSoFar.push_back(n);
+        });
+
+        for (uint i = 0; i < singlelvl.size()-1; i++)
+        {
+            start = singlelvl[i].end()+1;
+            end = singlelvl[i+1].begin()+1;
+            prefix = std::string(start, end);
+
+            bool delFlag = false;
+            bool found = false;
+            for (uint j = 0; j < matchesSoFar.size(); j++)
+            {
+                topics.apply_func_key(prefix, matchesSoFar[j], '/',
+                    [j, &found, &matchesSoFar](trie_node<topic_t>* n)
+                {
+                    matchesSoFar[j] = n;
+                    found = true;
+                });
+                if (!found)
+                {
+                    matchesSoFar[j] = nullptr;
+                    delFlag = true;
+                }
+                found = false;
+            }
+            if (delFlag)
+                matchesSoFar.erase(
+                            std::remove(matchesSoFar.begin(), matchesSoFar.end(), nullptr));
+        }
+
+        start = singlelvl[singlelvl.size()-1].end()+1;
+        end = topicFilter.cend();
+        prefix = std::string(start, end);
+        for (uint j = 0; j < matchesSoFar.size(); j++)
+        {
+            auto temp = topics.find(prefix, matchesSoFar[j]);
+            if (temp && temp->data)
+                matches.push_back(temp->data);
+        }
+    }
+
+
+    return matches;
+}
+
+void test_trie1(trie<topic_t>& topics)
+{
+    auto add = [&topics](const std::string& topic)
+        {topics.insert(topic, std::make_shared<topic_t>(topic));};
+    add("a");
+    add("aaa/");
+    add("aaa/b");
+    add("aaa/bbb");
+    add("aaa/bbb/c");
+    add("aaa/a/cc");
+
+    add("/");
+    add("/aaa");
+    add("/aaa/");
+    add("/aaa/b");
+    add("/aaa/bbb/c");
+    // test1 - return all topics
+    auto matches = get_matching_topics(topics, "#");
+    for (auto match: matches)
+        std::cout << match->name << "\n";
+}
+
+void test_trie2(trie<topic_t>& topics)
+{
+    auto add = [&topics](const std::string& topic)
+        {topics.insert(topic, std::make_shared<topic_t>(topic));};
+    std::string topicFilter = "/+/b";
+    std::vector<std::string> valid = {"/a/b", "/aaaaaaa/b"};
+    std::vector<std::string> invalid = {"a/b", "/a/bb", "/a/b/"};
+    for (auto el: invalid)
+        add(el);
+    for (auto el: valid)
+        add(el);
+
+    // test2 - return all topics that match prefix "+"
+    auto matches = get_matching_topics(topics, topicFilter);
+    for (uint i = 0; i < matches.size(); i++)
+        assert(valid[i] == matches[i]->name);
+}
+
+void test_trie3(trie<topic_t>& topics)
+{
+    auto add = [&topics](const std::string& topic)
+        {topics.insert(topic, std::make_shared<topic_t>(topic));};
+    std::string topicFilter = "a/+/b/+/c";
+    std::vector<std::string> valid = {"a/1/b/1/c", "a/22/b/22/c"};
+    std::vector<std::string> invalid = {"a/333/e/333/c", "a/4444/b/4444/d",
+                                        "a/1/b/1/c/", "/a/1/b/1/c", "b/1/b/1/c"};
+    for (auto el: invalid)
+        add(el);
+    for (auto el: valid)
+        add(el);
+
+    // test2 - return all topics that match prefix "+"
+    auto matches = get_matching_topics(topics, topicFilter);
+    for (uint i = 0; i < matches.size(); i++)
+        assert(valid[i] == matches[i]->name);
+}
+
+void test_trie()
+{
+    std::vector<trie<topic_t>> t;
+    t.resize(10);
+
+//    test_trie1(t[0]);
+    test_trie2(t[1]);
+    test_trie3(t[2]);
+}
 
 void tests()
 {
-    test_simple_pack_unpack();
+    test_trie();
+//    test_simple_pack_unpack();
 //    test_mqtt_encode_decode_length();
 //    test_pack_unpack();
 }
 
-*/
+#define CONNECT_BYTE  0x10
+#define PINGREQ_BYTE  0xC0
 
 template <typename T>
 class MQTTClient: public tps::net::client_interface<T>
@@ -231,21 +447,68 @@ public:
         msg >> con.sp.byte;
         msg >> con.rc;
     }
+
+    void publish()
+    {
+        static uint16_t pktID = 0;
+
+        mqtt_publish pub(PUBLISH_BYTE);
+        pub.header.bits.qos = 1;
+        pub.header.bits.retain = 0;
+        pub.pkt_id = pktID++;
+        pub.topic = "/example";
+        pub.topiclen = pub.topic.size();
+        pub.payload = "message_example";
+        pub.payloadlen = pub.payload.size();
+
+        tps::net::message<mqtt_header>pubmsg;
+        pub.pack(pubmsg);
+        this->send(std::move(pubmsg));
+    }
+
+    void subscribe()
+    {
+
+    }
+
+    void pingreq()
+    {
+        mqtt_pingreq pingreq(PINGREQ_BYTE);
+        tps::net::message<T> msg;
+
+        pingreq.pack(msg);
+        this->send(std::move(msg));
+    }
 };
 
-#define CLIENT
+//#define CLIENT
 
 int main()
 {
-//    tests();
+    tests();
     std::cout << "[" << std::this_thread::get_id() << "]MAIN THREAD\n";
+    return 0;
 
 #ifdef CLIENT
     MQTTClient<mqtt_header> client;
     client.connect("127.0.0.1", 5000);
 
-    mqtt_connect con(0);
-    con.header.bits.type = 1;
+    tps::net::tsqueue<int>input;
+    std::thread IOThread = std::thread([&input]()
+    {
+        while (1)
+        {
+            std::string in;
+            std::getline(std::cin, in);
+            try {
+                input.push_back(std::stoi(in));
+            } catch (...) {
+                // in case stoi fails
+            }
+        }
+    });
+
+    mqtt_connect con(CONNECT_BYTE);
     con.vhdr.bits.clean_session = 1;
     con.payload.client_id = "foo";
     con.payload.keepalive = 0xffff;
@@ -258,18 +521,41 @@ int main()
     {
         if (client.is_connected())
         {
+            if (!input.empty())
+            {
+                switch (input.pop_front())
+                {
+                    case 1: client.publish(); break;
+                    case 2: client.subscribe(); break;
+                    case 3: client.pingreq(); break;
+                    case 4: return 0;
+                }
+            }
+
             if (!client.incoming().empty())
             {
-                std::cout << "[" << std::this_thread::get_id() << "]MAIN POP BEFORE\n";
+//                std::cout << "[" << std::this_thread::get_id() << "]MAIN POP BEFORE\n";
                 tps::net::message<mqtt_header> msg = client.incoming().pop_front().msg;
-                std::cout << "[" << std::this_thread::get_id() << "]MAIN POP AFTER\n";
+//                std::cout << "[" << std::this_thread::get_id() << "]MAIN POP AFTER\n";
                 switch (packet_type(msg.hdr.byte.bits.type))
                 {
                     case packet_type::CONNACK:
                     {
-                        mqtt_connack resp(0);
+                        mqtt_connack resp;
                         client.unpack_connack(msg, resp);
-                        printf("SP:%d RC:%d\n", resp.sp.bits.session_present, resp.rc);
+                        std::cout << "\t{CONNACK}\n" << resp;
+                        break;
+                    }
+                    case packet_type::PUBACK:
+                    {
+                        mqtt_puback resp;
+                        resp.unpack(msg);
+                        std::cout << "\t{PUBACK}\n" << resp;
+                        break;
+                    }
+                    case packet_type::PINGRESP:
+                    {
+                        std::cout << "\t{PINGRESP}\n";
                         break;
                     }
                     default:
@@ -278,7 +564,7 @@ int main()
                 }
             }
         }
-        sleep(1);
+        usleep(100*1000);
     }
 #else
     server<mqtt_header> broker(5000);

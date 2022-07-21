@@ -87,16 +87,16 @@ namespace tps
             template <typename Type>
             void send(Type&& msg)
             {
-                std::cout << "[" << std::this_thread::get_id() << "]SEND BEFORE\n";
+//                std::cout << "[" << std::this_thread::get_id() << "]SEND BEFORE\n";
                 asio::post(m_asioContext, [this, msg = std::forward<Type>(msg)]() mutable
                 {
-                    printf("SEND %d header bytes + 0x%x body bytes: HDR:0x%x\n", msg.writeHdrSize, msg.hdr.size, msg.hdr.byte.byte);
+//                    printf("SEND %d header bytes + 0x%x body bytes: HDR:0x%x\n", msg.writeHdrSize, msg.hdr.size, msg.hdr.byte.byte);
                     bool bWritingMessage = !m_qMessageOut.empty();
                     m_qMessageOut.push_back(std::forward<Type>(msg));
                     if (!bWritingMessage)
                         write_header();
                 });
-                std::cout << "[" << std::this_thread::get_id() << "]SEND AFTER\n";
+//                std::cout << "[" << std::this_thread::get_id() << "]SEND AFTER\n";
             }
 
             class decode_len_t
@@ -154,11 +154,9 @@ namespace tps
                         {
                             if (m_msgTempIn.hdr.size > 0)
                             {
-                                printf("HDR:%x SIZE:%x\n", m_msgTempIn.hdr.byte.byte, m_msgTempIn.hdr.size);
+                                printf("HDR:%d SIZE:%d\n", m_msgTempIn.hdr.byte.byte, m_msgTempIn.hdr.size);
                                 m_msgTempIn.body.resize(m_msgTempIn.hdr.size);
                                 read_body();
-//                                memset(&m_msgTempIn.hdr, 0, sizeof(m_msgTempIn.hdr));
-//                                read_header();
                             }
                             else
                             {
@@ -242,14 +240,14 @@ namespace tps
 
             void add_to_incoming_message_queue()
             {
-                std::cout << "[" << std::this_thread::get_id() << "]add_to_incoming_message_queue BEFORE\n";
+//                std::cout << "[" << std::this_thread::get_id() << "]add_to_incoming_message_queue BEFORE\n";
 
                 if (m_nOwnerType == owner::server)
                     m_qMessageIn.push_back(owned_message<T>({this->shared_from_this(), std::move(m_msgTempIn)})); // server has an array of connections, so it needs to know which connection owns incoming message<T>
                 else
                     m_qMessageIn.push_back(owned_message<T>({nullptr, std::move(m_msgTempIn)})); // client has only 1 connection, this connection will own all of incoming msgs
 
-                std::cout << "[" << std::this_thread::get_id() << "]add_to_incoming_message_queue AFTER\n";
+//                std::cout << "[" << std::this_thread::get_id() << "]add_to_incoming_message_queue AFTER\n";
                 read_header();
             }
 
@@ -263,7 +261,7 @@ namespace tps
                         {
                             if (m_msgTempIn.hdr.size > 0)
                             {
-                                printf("RFH HDR:%x SIZE:%x %d\n", m_msgTempIn.hdr.byte.byte,
+                                printf("RFH HDR:%d SIZE:%d %d\n", m_msgTempIn.hdr.byte.byte,
                                        m_msgTempIn.hdr.size, m_msgTempIn.hdr.size);
                                 m_msgTempIn.body.resize(m_msgTempIn.hdr.size);
                                 read_first_body(server);

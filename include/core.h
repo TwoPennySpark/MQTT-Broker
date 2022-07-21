@@ -7,9 +7,17 @@
 #include <memory>
 #include "trie.h"
 #include "mqtt.h"
-#include "NetCommon/net_connection.h"
 
-struct topic;
+typedef struct topic topic_t;
+
+namespace tps
+{
+    namespace net
+    {
+        template <typename T>
+        class connection;
+    }
+}
 
 struct session
 {
@@ -18,8 +26,12 @@ struct session
         subscriptions.clear();
     }
 
-    bool cleansession;
-    std::list<std::shared_ptr<topic>> subscriptions;
+    bool cleanSession;
+    std::list<std::shared_ptr<topic_t>> subscriptions;
+    std::set<uint16_t> unregPuback;
+    std::set<uint16_t> unregPubrec;
+    std::set<uint16_t> unregPubrel;
+    std::set<uint16_t> unregPubcomp;
     // TODO add pending confirmed messages
 };
 
@@ -27,6 +39,7 @@ struct session
  * Wrapper structure around a connected client, each client can be a publisher
  * or a subscriber, it can be used to track sessions too
  */
+//template <typename T>
 typedef struct client
 {
     ~client();
@@ -47,11 +60,11 @@ typedef struct client
     std::shared_ptr<tps::net::connection<mqtt_header>> netClient;
 }client_t;
 
-struct subscriber
+typedef struct subscriber
 {
-    subscriber(uint8_t _qos, client& _client): qos(_qos), client(_client){}
+    subscriber(uint8_t _qos, client_t& _client): qos(_qos), client(_client){}
     uint8_t qos;
-    struct client& client;
+    client_t& client;
 
     bool operator<(const subscriber& s) const
     {
@@ -65,30 +78,32 @@ struct subscriber
             return *a < *b;
         }
     };
-};
+}subscriber_t;
 
-struct topic
+typedef struct topic
 {
-    topic(std::string& _name): name(_name){}
+    topic(const std::string& _name): name(_name){}
     std::string name;
+    std::string retainedMsg;
+    uint8_t retainedQOS;
     std::set<std::shared_ptr<subscriber>, subscriber::compare> subscribers;
 
     ~topic()
     {
         printf("Topic Deleted:%s\n", name.data());
     }
+}topic_t;
 
-    void add_subscriber(struct client *client,
-                        subscriber *sub,
-                        bool cleansession);
-    void del_subscriber(struct client *client,
-                              bool cleansession);
-};
-
-struct core
+typedef struct core
 {
-    trie<topic> topics;
-    std::unordered_map<std::string, std::shared_ptr<client_t>> clients;
-};
+    trie<topic_t> topics;
+    std::unordered_map<std::shared_ptr<tps::net::connection<mqtt_header>>,
+                                       std::shared_ptr<client_t>> clients;
+    std::unordered_map<std::string, std::shared_ptr<client_t>> clientsIDs;
+
+    void delete_client(std::shared_ptr<client_t> client);
+
+    std::vector<std::string> get_matching_topics(const std::string& topicFilter);
+}core_t;
 
 #endif // CORE_H

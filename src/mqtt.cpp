@@ -36,6 +36,94 @@ uint32_t mqtt_decode_length(tps::net::message<mqtt_header>& msg)
     return len;
 }
 
+std::ostream& operator<<(std::ostream& os, const mqtt_header& pkt)
+{
+    os << "\t=========HEADER=========\n";
+    printf("\tTYPE:\t%d\t|\tQOS:\t%d\t|\n\tRETAIN:\t%d\t|\tDUP:\t%d\t|\n",
+           pkt.bits.type, pkt.bits.qos, pkt.bits.retain, pkt.bits.dup);
+    os << "\t==========BODY==========\n\n";
+    return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const mqtt_packet& pkt)
+{
+    os << pkt.header;
+    os << "\t========END BODY========\n\n";
+    return os;
+}
+
+std::ostream& operator<<(std::ostream &os, const mqtt_connect &pkt)
+{
+    os << pkt.header;
+    os << "\tCLIENT ID: \"" << pkt.payload.client_id << "\"" << std::endl;
+    printf("\tCLEAN SESSION: %d\n", pkt.vhdr.bits.clean_session);
+    os << "\tKEEPALIVE: " << pkt.payload.keepalive << std::endl;
+    if (pkt.vhdr.bits.will)
+    {
+        os << "\tWILL TOPIC:" << "\"" << pkt.payload.will_topic << "\"" << std::endl;
+        os << "\tWILL MSG:" << "\"" << pkt.payload.will_message << "\"" << std::endl;
+        os << "\tWILL RETAIN:" << pkt.vhdr.bits.will_retain << std::endl;
+    }
+    if (pkt.vhdr.bits.username)
+        os << "\tUSERNAME:" << "\"" << pkt.payload.username << "\"" << std::endl;
+    if (pkt.vhdr.bits.password)
+        os << "\tPASSWORD:" << "\"" << pkt.payload.password << "\"" << std::endl;
+    os << "\t========END BODY========\n\n";
+    return os;
+}
+
+std::ostream& operator<<(std::ostream &os, const mqtt_connack &pkt)
+{
+    os << pkt.header;
+    printf("\tSP:\t%d\t|\tRC:\t%d\t|\n", pkt.sp.bits.session_present, pkt.rc);
+    os << "\t========END BODY========\n\n";
+
+    return os;
+}
+
+std::ostream& operator<<(std::ostream &os, const mqtt_publish &pkt)
+{
+    os << pkt.header;
+    os << "\tPKT ID: " << pkt.pkt_id << std::endl;
+    os << "\tTOPIC[" << pkt.topiclen << "]: " << "\"" << pkt.topic << "\"" << std::endl;
+    os << "\tPAYLOAD[" << pkt.payloadlen << "]: " << "\"" << pkt.payload << "\"" << std::endl;
+    os << "\t========END BODY========\n\n";
+
+    return os;
+}
+
+std::ostream& operator<<(std::ostream &os, const mqtt_subscribe &pkt)
+{
+    os << pkt.header;
+    os << "\tPKT ID: " << pkt.pkt_id << std::endl;
+    for (auto t: pkt.tuples)
+        os << "\tTOPIC[" << t.topiclen << "]: "
+           << "\"" << t.topic << "\": " << t.qos << std::endl;
+
+    return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const mqtt_suback& pkt)
+{
+    os << pkt.header;
+    os << "\tPKT ID: " << pkt.pkt_id << std::endl;
+    os << "\tRCS: ";
+    for (auto rc: pkt.rcs)
+        os << rc << " ";
+    os << std::endl;
+
+    return os;
+}
+
+std::ostream& operator<<(std::ostream &os, const mqtt_ack &pkt)
+{
+    os << pkt.header;
+    os << "\tPKT ID: " << pkt.pkt_id << std::endl;
+    os << "\t========END BODY========\n\n";
+
+    return os;
+}
+
 std::shared_ptr<mqtt_packet> mqtt_packet::create(tps::net::message<mqtt_header>& msg)
 {
     std::shared_ptr<mqtt_packet> ret;
@@ -139,21 +227,35 @@ void mqtt_connect::unpack(tps::net::message<mqtt_header>& msg)
 
 void mqtt_subscribe::unpack(tps::net::message<mqtt_header>& msg)
 {
+    // [MQTT-3.8.1-1]
+    if (msg.hdr.byte.bits.qos != 1)
+        return;
+
     msg >> pkt_id;
 
     uint32_t remainingBytes = msg.hdr.size - sizeof(pkt_id);
+
+    if (!remainingBytes) // [MQTT-3.8.3-3].
+        return;
 
     uint16_t count = 0;
     while (remainingBytes > 0)
     {
         tuples.resize(count+1);
-        msg >> tuples[count].topic_len;
-        remainingBytes -= sizeof(tuples[count].topic_len);
 
-        tuples[count].topic.resize(tuples[count].topic_len);
+        msg >> tuples[count].topiclen;
+        if (!tuples[count].topiclen) // [MQTT-4.7.3-1]
+            return;
+        remainingBytes -= sizeof(tuples[count].topiclen);
+
+        tuples[count].topic.resize(tuples[count].topiclen);
         msg >> tuples[count].topic;
         msg >> tuples[count].qos;
-        remainingBytes -= tuples[count].topic_len +
+
+        if (tuples[count].qos > EXACTLY_ONCE)
+            return;
+
+        remainingBytes -= tuples[count].topiclen +
                           sizeof(tuples[count].qos);
         count++;
     }
@@ -169,12 +271,12 @@ void mqtt_unsubscribe::unpack(tps::net::message<mqtt_header>& msg)
     while (remainingBytes > 0)
     {
         tuples.resize(count+1);
-        msg >> tuples[count].topic_len;
-        remainingBytes -= sizeof(tuples[count].topic_len);
+        msg >> tuples[count].topiclen;
+        remainingBytes -= sizeof(tuples[count].topiclen);
 
-        tuples[count].topic.resize(tuples[count].topic_len);
+        tuples[count].topic.resize(tuples[count].topiclen);
         msg >> tuples[count].topic;
-        remainingBytes -= tuples[count].topic_len;
+        remainingBytes -= tuples[count].topiclen;
         count++;
     }
 }

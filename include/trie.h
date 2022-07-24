@@ -69,29 +69,32 @@ public:
     }
 
     // apply function 'func' to perfix node and all prefix's children
-    void apply_func(const std::string &prefix, std::function<void(trie_node<T> *)> func)
+    void apply_func(const std::string &prefix, trie_node<T>* start, std::function<void(trie_node<T> *)> func)
     {
-        if (prefix.size())
-        {
-            trie_node<T> *node = find(prefix);
-            if (node)
-                recursive_apply_func(node, func);
-        }
-        else
-            recursive_apply_func(&root, func);
+        if (!start)
+            start = &root;
+        trie_node<T> *node = find(prefix, start);
+        if (node)
+            recursive_apply_func(node, func);
     }
 
     // look for occurences of 'key', starting from 'start'+'prefix' node, and apply function 'func' to them
-    void apply_func_key(const std::string &prefix, trie_node<T>* start, char until, std::function<void(trie_node<T> *)> func)
+    void apply_func_key(const std::string &prefix, trie_node<T>* start, char key, std::function<void(trie_node<T> *)> func)
     {
-        if (prefix.size())
-        {
-            trie_node<T> *node = find(prefix, start);
-            if (node)
-                recursive_apply_func_key(node, until, func);
-        }
-        else
-            recursive_apply_func_key(&root, until, func);
+        if (!start)
+            start = &root;
+        trie_node<T> *node = find(prefix, start);
+        if (node)
+            recursive_apply_func_key(node, key, func);
+    }
+
+    void find_all_data_until(const std::string &prefix, trie_node<T>* start, char until, std::function<void(trie_node<T> *)> func)
+    {
+        if (!start)
+            start = &root;
+        trie_node<T> *node = find(prefix, start);
+        if (node)
+            recursive_find_data_until(node, until, func);
     }
 
     void erase(const std::string& prefix)
@@ -158,6 +161,24 @@ private:
                     recursive_apply_func_key(child, key, func);
                 else
                     func(child);
+            }
+        }
+    }
+
+    void recursive_find_data_until(trie_node<T> *node, char until, std::function<void(trie_node<T> *)> func)
+    {
+        if (node->data)
+            func(node);
+
+        uint child_num = node->children_num;
+        for (uint i = 0; i < ALPHABET_SIZE && child_num; i++)
+        {
+            if (node->children[i])
+            {
+                trie_node<T>* child = node->children[i].get();
+                child_num--;
+                if (i != until-32)
+                    recursive_find_data_until(child, until, func);
             }
         }
     }

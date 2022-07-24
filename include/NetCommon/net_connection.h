@@ -109,7 +109,7 @@ namespace tps
                     static uint32_t len = 0;
                     static uint8_t lenIndex = 0;
 
-                    printf("DECODE:%d %d %d\n", size, m_msgTempIn.hdr.byte.byte, m_msgTempIn.hdr.size);
+//                    printf("DECODE:%d %d %d\n", size, m_msgTempIn.hdr.byte.byte, m_msgTempIn.hdr.size);
 
                     if (ec)
                         return 0;

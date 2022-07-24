@@ -44,7 +44,7 @@ std::vector<std::string> core_t::get_matching_topics(const std::string &topicFil
         multilvl = true;
         if (topicFilter.length() == 1)
         {
-             topics.apply_func(prefix, [&prefix, &matches](trie_node<topic_t>* t)
+             topics.apply_func(prefix, nullptr, [&prefix, &matches](trie_node<topic_t>* t)
              {
                  if (t->data->name == prefix)
                      return;

@@ -228,106 +228,111 @@ void test_pack_unpack()
 ============================================
 */
 
+
 std::vector<std::shared_ptr<topic_t>> get_matching_topics(trie<topic_t>& topics, const std::string &topicFilter)
 {
     std::vector<std::shared_ptr<topic_t>> matches;
+    std::vector<trie_node<topic_t>*> matchesSoFar;
+    matchesSoFar.push_back(nullptr);
     std::string prefix = "";
+    bool singleIsLast = false; // true when last symbol is '+'
 
     bool multilvl = false;
-    // if there is a '#' wildcard
+    // if there is a '#'(multi-lvl) wildcard, can mean one of two things:
+    // 1) topicFilter == "#" or
+    // 2) '#' is the last symbol of topicFilter
     if (topicFilter.find("#") != std::string::npos)
     {
-        // '#' is last symbol
-        if (topicFilter[topicFilter.length()-1] == '#')
+        // if topicFilter == "#"
+        if (topicFilter.length() == 1)
         {
-            // if topicFilter == "#"
-            if (topicFilter.length() == 1)
+            // every topic is a match
+            topics.apply_func(prefix, nullptr, [&prefix, &matches](trie_node<topic_t>* t)
             {
-                // every topic is a match
-                topics.apply_func(prefix, [&prefix, &matches](trie_node<topic_t>* t)
-                {
-                    if (t->data->name == prefix)
-                        return;
+                if (t->data->name == prefix)
+                    return;
 
-                    matches.push_back(t->data);
-                });
-                return matches;
-            }
-            multilvl = true;
-        }
-        else
-        {// ERROR: '#' is not last symbol
+                matches.push_back(t->data);
+            });
             return matches;
+        }
+        else // we need to evaluate the expr before '#' first
+        {
+            multilvl = true;
+            prefix = topicFilter;
         }
     }
 
+    // if there is a one or more '+'(single lvl) wildcards
     if (topicFilter.find("+") != std::string::npos)
     {
         std::vector<boost::iterator_range<std::string::const_iterator>> singlelvl;
         boost::find_all(singlelvl, topicFilter, "/+");
-//        if (topicFilter[0] == '+')
-//            singlelvl.emplace(singlelvl.cbegin(),
-//                              boost::iterator_range<std::string::const_iterator>(topicFilter.cbegin(), topicFilter.cbegin()+1));
-
-        std::vector<trie_node<topic_t>*> matchesSoFar;
-
         if (topicFilter[0] == '+')
-        {
-            topics.apply_func_key(prefix, nullptr, '/',
-                [&matchesSoFar](trie_node<topic_t>* n)
-            {
-                matchesSoFar.push_back(n);
-            });
-        }
+            singlelvl.emplace(singlelvl.cbegin(),
+                          boost::iterator_range<std::string::const_iterator>(topicFilter.cbegin(), topicFilter.cbegin()+1));
 
         auto start = topicFilter.cbegin();
-        auto end = singlelvl[0].begin();
-        prefix = std::string(start, end+1);
-        topics.apply_func_key(prefix, nullptr, '/',
-            [&matchesSoFar](trie_node<topic_t>* n)
-        {
-            matchesSoFar.push_back(n);
-        });
+        auto end = singlelvl[0].begin()+1;
+        if (topicFilter[0] == '+')
+            start++;
+        if (topicFilter[topicFilter.size()-1] == '+')
+            singleIsLast = true;
 
-        for (uint i = 0; i < singlelvl.size()-1; i++)
+        uint i = 0;
+        std::vector<trie_node<topic_t>*> temp;
+        do
         {
-            start = singlelvl[i].end()+1;
-            end = singlelvl[i+1].begin()+1;
             prefix = std::string(start, end);
 
-            bool delFlag = false;
-            bool found = false;
+            if (singleIsLast && i == singlelvl.size()-1)
+                break;
+
             for (uint j = 0; j < matchesSoFar.size(); j++)
-            {
+                // +/a   - from matchesSoFar[j](if nullptr - from root) go to "" (prefix) then find all topicnames until '/'
+                // /+/a/ - from matchesSoFar[j](if nullptr - from root) go to / (prefix) then find all topicnames until '/'
+                // /a/+/ - from matchesSoFar[j](if nullptr - from root) go to /a/ (prefix) then find all topicnames until '/'
                 topics.apply_func_key(prefix, matchesSoFar[j], '/',
-                    [j, &found, &matchesSoFar](trie_node<topic_t>* n)
-                {
-                    matchesSoFar[j] = n;
-                    found = true;
-                });
-                if (!found)
-                {
-                    matchesSoFar[j] = nullptr;
-                    delFlag = true;
-                }
-                found = false;
-            }
-            if (delFlag)
-                matchesSoFar.erase(
-                            std::remove(matchesSoFar.begin(), matchesSoFar.end(), nullptr));
-        }
+                    [&temp](trie_node<topic_t>* n) { temp.push_back(n); });
+
+            matchesSoFar = std::move(temp);
+
+            start = singlelvl[i].end()+1;
+            end = singlelvl[i+1].begin()+1;
+            i++;
+        }while (i < singlelvl.size());
 
         start = singlelvl[singlelvl.size()-1].end()+1;
         end = topicFilter.cend();
-        prefix = std::string(start, end);
-        for (uint j = 0; j < matchesSoFar.size(); j++)
-        {
-            auto temp = topics.find(prefix, matchesSoFar[j]);
-            if (temp && temp->data)
-                matches.push_back(temp->data);
-        }
+        if (!singleIsLast)
+            prefix = std::string(start, end);
     }
 
+    if (multilvl)
+    {
+        prefix.pop_back();
+        for (uint i = 0; i < matchesSoFar.size(); i++)
+            topics.apply_func(prefix, matchesSoFar[i],
+                [&matches](trie_node<topic_t>* n) { matches.push_back(n->data); });
+    }
+    else
+    {
+        if (singleIsLast)
+        {
+            for (uint i = 0; i < matchesSoFar.size(); i++)
+                topics.find_all_data_until(prefix, matchesSoFar[i], '/',
+                    [&matches](trie_node<topic_t>* n) { matches.push_back(n->data); });
+        }
+        else
+        {
+            for (uint i = 0; i < matchesSoFar.size(); i++)
+            {
+                auto n = topics.find(prefix, matchesSoFar[i]);
+                if (n && n->data)
+                    matches.push_back(n->data);
+            }
+        }
+    }
 
     return matches;
 }
@@ -336,22 +341,19 @@ void test_trie1(trie<topic_t>& topics)
 {
     auto add = [&topics](const std::string& topic)
         {topics.insert(topic, std::make_shared<topic_t>(topic));};
-    add("a");
-    add("aaa/");
-    add("aaa/b");
-    add("aaa/bbb");
-    add("aaa/bbb/c");
-    add("aaa/a/cc");
+    std::vector<std::string> valid = {"a", "aaa/", "aaa/b", "aaa/bbb", "aaa/bbb/c",
+                                     "aaa/a/cc", "/", "/aaa", "/aaa/b", "/aaa/bbb/c"};
+    for (auto el: valid)
+        add(el);
 
-    add("/");
-    add("/aaa");
-    add("/aaa/");
-    add("/aaa/b");
-    add("/aaa/bbb/c");
     // test1 - return all topics
     auto matches = get_matching_topics(topics, "#");
-    for (auto match: matches)
-        std::cout << match->name << "\n";
+    assert(matches.size() == valid.size());
+    for (uint i = 0; i < matches.size(); i++)
+    {
+        if (std::find(valid.begin(), valid.end(), matches[i]->name) == valid.end())
+            assert(1 == 0);
+    }
 }
 
 void test_trie2(trie<topic_t>& topics)
@@ -368,6 +370,7 @@ void test_trie2(trie<topic_t>& topics)
 
     // test2 - return all topics that match prefix "+"
     auto matches = get_matching_topics(topics, topicFilter);
+    assert(matches.size() == valid.size());
     for (uint i = 0; i < matches.size(); i++)
         assert(valid[i] == matches[i]->name);
 }
@@ -387,18 +390,232 @@ void test_trie3(trie<topic_t>& topics)
 
     // test2 - return all topics that match prefix "+"
     auto matches = get_matching_topics(topics, topicFilter);
+    assert(matches.size() == valid.size());
     for (uint i = 0; i < matches.size(); i++)
         assert(valid[i] == matches[i]->name);
+}
+
+void test_trie4(trie<topic_t>& topics)
+{
+    auto add = [&topics](const std::string& topic)
+        {topics.insert(topic, std::make_shared<topic_t>(topic));};
+    std::string topicFilter = "/+/b/+/c";
+    std::vector<std::string> valid = {"/1/b/1/c", "/22/b/22/c"};
+    std::vector<std::string> invalid = {"/333/e/333/c", "/4444/b/4444/d",
+                                        "/1/b/1/c/", "/a/1/b/1/c"};
+    for (auto el: invalid)
+        add(el);
+    for (auto el: valid)
+        add(el);
+
+    // test2 - return all topics that match prefix "+"
+    auto matches = get_matching_topics(topics, topicFilter);
+    assert(matches.size() == valid.size());
+    for (uint i = 0; i < matches.size(); i++)
+        assert(valid[i] == matches[i]->name);
+}
+
+void test_trie5(trie<topic_t>& topics)
+{
+    auto add = [&topics](const std::string& topic)
+        {topics.insert(topic, std::make_shared<topic_t>(topic));};
+    std::string topicFilter = "/+/+/c";
+    std::vector<std::string> valid = {"/1/b/c", "/22/b/c"};
+    std::vector<std::string> invalid = {"/333/e/333/c", "/4444/4444/d",
+                                        "/1/b/c/", "6/b/c"};
+    for (auto el: invalid)
+        add(el);
+    for (auto el: valid)
+        add(el);
+
+    // test2 - return all topics that match prefix "+"
+    auto matches = get_matching_topics(topics, topicFilter);
+    assert(matches.size() == valid.size());
+    for (uint i = 0; i < matches.size(); i++)
+        assert(valid[i] == matches[i]->name);
+}
+
+void test_trie6(trie<topic_t>& topics)
+{
+    auto add = [&topics](const std::string& topic)
+        {topics.insert(topic, std::make_shared<topic_t>(topic));};
+    std::string topicFilter = "+/a/bb/ccc";
+    std::vector<std::string> valid = {"11wdsada90/a/bb/ccc", "a/a/bb/ccc",
+                                      "/a/bb/ccc"};
+    std::vector<std::string> invalid = {"/1/a/bb/ccc", "2/a/bb/ccc/",
+                                        "/a/bb/ccc/"};
+    for (auto el: invalid)
+        add(el);
+    for (auto el: valid)
+        add(el);
+
+    // test2 - return all topics that match prefix "+"
+    auto matches = get_matching_topics(topics, topicFilter);
+    assert(matches.size() == valid.size());
+    for (uint i = 0; i < matches.size(); i++)
+    {
+        if (std::find(valid.begin(), valid.end(), matches[i]->name) == valid.end())
+            assert(1 == 0);
+    }
+}
+
+void test_trie7(trie<topic_t>& topics)
+{
+    auto add = [&topics](const std::string& topic)
+        {topics.insert(topic, std::make_shared<topic_t>(topic));};
+    std::string topicFilter = "+/+/a/+/bb/";
+    std::vector<std::string> valid = {"1/22/a/333/bb/", "f/g/a/3122/bb/",
+                                       "/22/a/333/bb/"};
+    std::vector<std::string> invalid = {"x/a/333/bb/", "/y/a/333/bb",
+                                        "z/22/a/3/33/bb/", "f/g/a/333/bb/ccc"};
+    for (auto el: invalid)
+        add(el);
+    for (auto el: valid)
+        add(el);
+
+    // test2 - return all topics that match prefix "+"
+    auto matches = get_matching_topics(topics, topicFilter);
+    assert(matches.size() == valid.size());
+    for (uint i = 0; i < matches.size(); i++)
+    {
+        if (std::find(valid.begin(), valid.end(), matches[i]->name) == valid.end())
+            assert(1 == 0);
+    }
+}
+
+void test_trie8(trie<topic_t>& topics)
+{
+    auto add = [&topics](const std::string& topic)
+        {topics.insert(topic, std::make_shared<topic_t>(topic));};
+    std::string topicFilter = "a/b/#";
+    std::vector<std::string> valid = {"a/b/", "a/b/cc/ddd/eeee/fffff/",
+                                       "a/b/c"};
+    std::vector<std::string> invalid = {"x/a/b/", "a/b",
+                                        "/a/b/c", "f/g/h"};
+    for (auto el: invalid)
+        add(el);
+    for (auto el: valid)
+        add(el);
+
+    // test2 - return all topics that match prefix "+"
+    auto matches = get_matching_topics(topics, topicFilter);
+    assert(matches.size() == valid.size());
+    for (uint i = 0; i < matches.size(); i++)
+    {
+        if (std::find(valid.begin(), valid.end(), matches[i]->name) == valid.end())
+            assert(1 == 0);
+    }
+}
+
+void test_trie9(trie<topic_t>& topics)
+{
+    auto add = [&topics](const std::string& topic)
+        {topics.insert(topic, std::make_shared<topic_t>(topic));};
+    std::string topicFilter = "+/#";
+    std::vector<std::string> valid = {"a/b/", "a/b/cc/ddd/eeee/fffff/",
+                                       "a/b/c", "/a/b/c", "/f/g/h/"};
+    std::vector<std::string> invalid = {"cccc"};
+    for (auto el: invalid)
+        add(el);
+    for (auto el: valid)
+        add(el);
+
+    // test2 - return all topics that match prefix "+"
+    auto matches = get_matching_topics(topics, topicFilter);
+    assert(matches.size() == valid.size());
+    for (uint i = 0; i < matches.size(); i++)
+    {
+        if (std::find(valid.begin(), valid.end(), matches[i]->name) == valid.end())
+            assert(1 == 0);
+    }
+}
+
+void test_trie10(trie<topic_t>& topics)
+{
+    auto add = [&topics](const std::string& topic)
+        {topics.insert(topic, std::make_shared<topic_t>(topic));};
+    std::string topicFilter = "+/a/+/b/+/#";
+    std::vector<std::string> valid = {"1/a/22/b/333/", "4/a/5 5/b/66 6/ccc",
+                                       "/a/1/b/22/c/ddd/ee/ff/gg/"};
+    std::vector<std::string> invalid = {"a/1/b/2/c", "/1/a/2/b/c/", "1/a/22/b/333"};
+    for (auto el: invalid)
+        add(el);
+    for (auto el: valid)
+        add(el);
+
+    // test2 - return all topics that match prefix "+"
+    auto matches = get_matching_topics(topics, topicFilter);
+    assert(matches.size() == valid.size());
+    for (uint i = 0; i < matches.size(); i++)
+    {
+        if (std::find(valid.begin(), valid.end(), matches[i]->name) == valid.end())
+            assert(1 == 0);
+    }
+}
+
+void test_trie11(trie<topic_t>& topics)
+{
+    auto add = [&topics](const std::string& topic)
+        {topics.insert(topic, std::make_shared<topic_t>(topic));};
+    std::string topicFilter = "/a/+";
+    std::vector<std::string> valid = {"/a/b", "/a/ccc",
+                                       "/a/"};
+    std::vector<std::string> invalid = {"a/b", "/a/b/", "/a/b/c"};
+    for (auto el: invalid)
+        add(el);
+    for (auto el: valid)
+        add(el);
+
+    // test2 - return all topics that match prefix "+"
+    auto matches = get_matching_topics(topics, topicFilter);
+    assert(matches.size() == valid.size());
+    for (uint i = 0; i < matches.size(); i++)
+    {
+        if (std::find(valid.begin(), valid.end(), matches[i]->name) == valid.end())
+            assert(1 == 0);
+    }
+}
+
+void test_trie12(trie<topic_t>& topics)
+{
+    auto add = [&topics](const std::string& topic)
+        {topics.insert(topic, std::make_shared<topic_t>(topic));};
+    std::string topicFilter = "/a/+/+";
+    std::vector<std::string> valid = {"/a/b/c", "/a/ccc/dddd",
+                                       "/a/e/ff", "/a/r/"};
+    std::vector<std::string> invalid = {"a/b/c", "/a/b", "/a/b/c/"};
+    for (auto el: invalid)
+        add(el);
+    for (auto el: valid)
+        add(el);
+
+    // test2 - return all topics that match prefix "+"
+    auto matches = get_matching_topics(topics, topicFilter);
+    assert(matches.size() == valid.size());
+    for (uint i = 0; i < matches.size(); i++)
+    {
+        if (std::find(valid.begin(), valid.end(), matches[i]->name) == valid.end())
+            assert(1 == 0);
+    }
 }
 
 void test_trie()
 {
     std::vector<trie<topic_t>> t;
-    t.resize(10);
+    t.resize(20);
 
-//    test_trie1(t[0]);
+    test_trie1(t[0]);
     test_trie2(t[1]);
     test_trie3(t[2]);
+    test_trie4(t[3]);
+    test_trie5(t[4]);
+    test_trie6(t[5]);
+    test_trie7(t[6]);
+    test_trie8(t[7]);
+    test_trie9(t[8]);
+    test_trie10(t[9]);
+    test_trie11(t[10]);
+    test_trie12(t[11]);
 }
 
 void tests()

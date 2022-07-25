@@ -114,7 +114,8 @@ private:
             if (existingClient->active)
             {
                 existingClient->netClient->disconnect();
-                core.clients.erase(client->netClient);
+
+                core.clients.erase(existingClient->netClient);
                 core.clients.emplace(std::pair<std::shared_ptr<tps::net::connection<T>>,
                                      std::shared_ptr<client_t>>(netClient, existingClient));
             }
@@ -137,7 +138,7 @@ private:
         }
         else
         {
-            auto newClient = std::make_shared<client_t>();
+            auto newClient = std::make_shared<client_t>(netClient);
             newClient->clientID = pkt->payload.client_id;
 
             connack.sp.byte = 0;
@@ -182,26 +183,35 @@ private:
         auto client = it->second;
         mqtt_suback suback(SUBACK_BYTE);
 
-        for (auto tuple: pkt->tuples)
+        for (auto& tuple: pkt->tuples)
         {
             if (tuple.topic[0] == '+' || tuple.topic[tuple.topic.length()-1] == '#'
                     || tuple.topic.find("/+") != std::string::npos)
-                core.get_matching_topics(tuple.topic);
-
-            std::shared_ptr<topic_t> topic;
-            auto topicNode = core.topics.find(tuple.topic);
-            if (topicNode && topicNode->data)
-                topic = topicNode->data;
-
-            if (!topic)
             {
-                std::shared_ptr<topic_t> newTopic = std::make_shared<topic_t>(tuple.topic);
-                core.topics.insert(tuple.topic, newTopic);
-                topic = newTopic;
+                auto matches = core.get_matching_topics(tuple.topic);
+
+                for (auto& topic: matches)
+                {
+                    topic->subscribers.emplace(std::make_shared<subscriber_t>(tuple.qos, *client));
+                    client->session.subscriptions.push_back(topic);
+                }
             }
-            std::shared_ptr<subscriber_t> newSub = std::make_shared<subscriber_t>(tuple.qos, *client);
-            topic->subscribers.insert(newSub);
-            client->session.subscriptions.push_back(topic);
+            else
+            {
+                std::shared_ptr<topic_t> topic;
+                auto topicNode = core.topics.find(tuple.topic);
+                if (topicNode && topicNode->data) // if topic already exists
+                    topic = topicNode->data;
+                else
+                { // create new topic
+                    std::shared_ptr<topic_t> newTopic = std::make_shared<topic_t>(tuple.topic);
+                    core.topics.insert(tuple.topic, newTopic);
+                    topic = newTopic;
+                }
+
+                topic->subscribers.emplace(std::make_shared<subscriber_t>(tuple.qos, *client));
+                client->session.subscriptions.push_back(topic);
+            }
             suback.rcs.push_back(tuple.qos);
         }
 
@@ -249,7 +259,7 @@ private:
         pub.payload = std::move(pkt->payload);
         tps::net::message<T> pubmsg;
         pub.pack(pubmsg);
-        for (auto sub: topic->subscribers)
+        for (auto& sub: topic->subscribers)
         {
             pubmsg.hdr.byte.bits.qos = sub->qos;
             if (sub->qos == AT_LEAST_ONCE)

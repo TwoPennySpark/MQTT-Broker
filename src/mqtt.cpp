@@ -38,17 +38,17 @@ uint32_t mqtt_decode_length(tps::net::message<mqtt_header>& msg)
 
 std::ostream& operator<<(std::ostream& os, const mqtt_header& pkt)
 {
-    os << "\t=========HEADER=========\n";
+    os << "\t=================HEADER=================\n";
     printf("\tTYPE:\t%d\t|\tQOS:\t%d\t|\n\tRETAIN:\t%d\t|\tDUP:\t%d\t|\n",
            pkt.bits.type, pkt.bits.qos, pkt.bits.retain, pkt.bits.dup);
-    os << "\t==========BODY==========\n\n";
+    os << "\t==================BODY==================\n\n";
     return os;
 }
 
 std::ostream& operator<<(std::ostream& os, const mqtt_packet& pkt)
 {
     os << pkt.header;
-    os << "\t========END BODY========\n\n";
+    os << "\t=====================END BODY=====================\n\n";
     return os;
 }
 
@@ -68,7 +68,7 @@ std::ostream& operator<<(std::ostream &os, const mqtt_connect &pkt)
         os << "\tUSERNAME:" << "\"" << pkt.payload.username << "\"" << std::endl;
     if (pkt.vhdr.bits.password)
         os << "\tPASSWORD:" << "\"" << pkt.payload.password << "\"" << std::endl;
-    os << "\t========END BODY========\n\n";
+    os << "\t================END BODY================\n\n";
     return os;
 }
 
@@ -76,7 +76,7 @@ std::ostream& operator<<(std::ostream &os, const mqtt_connack &pkt)
 {
     os << pkt.header;
     printf("\tSP:\t%d\t|\tRC:\t%d\t|\n", pkt.sp.bits.session_present, pkt.rc);
-    os << "\t========END BODY========\n\n";
+    os << "\t================END BODY================\n\n";
 
     return os;
 }
@@ -87,7 +87,7 @@ std::ostream& operator<<(std::ostream &os, const mqtt_publish &pkt)
     os << "\tPKT ID: " << pkt.pkt_id << std::endl;
     os << "\tTOPIC[" << pkt.topiclen << "]: " << "\"" << pkt.topic << "\"" << std::endl;
     os << "\tPAYLOAD[" << pkt.payloadlen << "]: " << "\"" << pkt.payload << "\"" << std::endl;
-    os << "\t========END BODY========\n\n";
+    os << "\t================END BODY================\n\n";
 
     return os;
 }
@@ -96,9 +96,10 @@ std::ostream& operator<<(std::ostream &os, const mqtt_subscribe &pkt)
 {
     os << pkt.header;
     os << "\tPKT ID: " << pkt.pkt_id << std::endl;
-    for (auto t: pkt.tuples)
+    for (auto& t: pkt.tuples)
         os << "\tTOPIC[" << t.topiclen << "]: "
            << "\"" << t.topic << "\": " << t.qos << std::endl;
+    os << "\t================END BODY================\n\n";
 
     return os;
 }
@@ -111,6 +112,7 @@ std::ostream& operator<<(std::ostream& os, const mqtt_suback& pkt)
     for (auto rc: pkt.rcs)
         os << rc << " ";
     os << std::endl;
+    os << "\t================END BODY================\n\n";
 
     return os;
 }
@@ -119,7 +121,7 @@ std::ostream& operator<<(std::ostream &os, const mqtt_ack &pkt)
 {
     os << pkt.header;
     os << "\tPKT ID: " << pkt.pkt_id << std::endl;
-    os << "\t========END BODY========\n\n";
+    os << "\t=====================END BODY=====================\n\n";
 
     return os;
 }

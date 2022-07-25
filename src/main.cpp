@@ -233,7 +233,7 @@ std::vector<std::shared_ptr<topic_t>> get_matching_topics(trie<topic_t>& topics,
 {
     std::vector<std::shared_ptr<topic_t>> matches;
     std::vector<trie_node<topic_t>*> matchesSoFar;
-    matchesSoFar.push_back(nullptr);
+    matchesSoFar.push_back(nullptr); // first search is from root
     std::string prefix = "";
     bool singleIsLast = false; // true when last symbol is '+'
 
@@ -283,6 +283,7 @@ std::vector<std::shared_ptr<topic_t>> get_matching_topics(trie<topic_t>& topics,
         std::vector<trie_node<topic_t>*> temp;
         do
         {
+            // prefix = everything that comes before "/+", including '/'
             prefix = std::string(start, end);
 
             if (singleIsLast && i == singlelvl.size()-1)
@@ -343,7 +344,7 @@ void test_trie1(trie<topic_t>& topics)
         {topics.insert(topic, std::make_shared<topic_t>(topic));};
     std::vector<std::string> valid = {"a", "aaa/", "aaa/b", "aaa/bbb", "aaa/bbb/c",
                                      "aaa/a/cc", "/", "/aaa", "/aaa/b", "/aaa/bbb/c"};
-    for (auto el: valid)
+    for (auto& el: valid)
         add(el);
 
     // test1 - return all topics
@@ -363,16 +364,19 @@ void test_trie2(trie<topic_t>& topics)
     std::string topicFilter = "/+/b";
     std::vector<std::string> valid = {"/a/b", "/aaaaaaa/b"};
     std::vector<std::string> invalid = {"a/b", "/a/bb", "/a/b/"};
-    for (auto el: invalid)
+    for (auto& el: invalid)
         add(el);
-    for (auto el: valid)
+    for (auto& el: valid)
         add(el);
 
     // test2 - return all topics that match prefix "+"
     auto matches = get_matching_topics(topics, topicFilter);
     assert(matches.size() == valid.size());
     for (uint i = 0; i < matches.size(); i++)
-        assert(valid[i] == matches[i]->name);
+    {
+        if (std::find(valid.begin(), valid.end(), matches[i]->name) == valid.end())
+            assert(1 == 0);
+    }
 }
 
 void test_trie3(trie<topic_t>& topics)
@@ -383,16 +387,19 @@ void test_trie3(trie<topic_t>& topics)
     std::vector<std::string> valid = {"a/1/b/1/c", "a/22/b/22/c"};
     std::vector<std::string> invalid = {"a/333/e/333/c", "a/4444/b/4444/d",
                                         "a/1/b/1/c/", "/a/1/b/1/c", "b/1/b/1/c"};
-    for (auto el: invalid)
+    for (auto& el: invalid)
         add(el);
-    for (auto el: valid)
+    for (auto& el: valid)
         add(el);
 
     // test2 - return all topics that match prefix "+"
     auto matches = get_matching_topics(topics, topicFilter);
     assert(matches.size() == valid.size());
     for (uint i = 0; i < matches.size(); i++)
-        assert(valid[i] == matches[i]->name);
+    {
+        if (std::find(valid.begin(), valid.end(), matches[i]->name) == valid.end())
+            assert(1 == 0);
+    }
 }
 
 void test_trie4(trie<topic_t>& topics)
@@ -403,16 +410,19 @@ void test_trie4(trie<topic_t>& topics)
     std::vector<std::string> valid = {"/1/b/1/c", "/22/b/22/c"};
     std::vector<std::string> invalid = {"/333/e/333/c", "/4444/b/4444/d",
                                         "/1/b/1/c/", "/a/1/b/1/c"};
-    for (auto el: invalid)
+    for (auto& el: invalid)
         add(el);
-    for (auto el: valid)
+    for (auto& el: valid)
         add(el);
 
     // test2 - return all topics that match prefix "+"
     auto matches = get_matching_topics(topics, topicFilter);
     assert(matches.size() == valid.size());
     for (uint i = 0; i < matches.size(); i++)
-        assert(valid[i] == matches[i]->name);
+    {
+        if (std::find(valid.begin(), valid.end(), matches[i]->name) == valid.end())
+            assert(1 == 0);
+    }
 }
 
 void test_trie5(trie<topic_t>& topics)
@@ -423,16 +433,19 @@ void test_trie5(trie<topic_t>& topics)
     std::vector<std::string> valid = {"/1/b/c", "/22/b/c"};
     std::vector<std::string> invalid = {"/333/e/333/c", "/4444/4444/d",
                                         "/1/b/c/", "6/b/c"};
-    for (auto el: invalid)
+    for (auto& el: invalid)
         add(el);
-    for (auto el: valid)
+    for (auto& el: valid)
         add(el);
 
     // test2 - return all topics that match prefix "+"
     auto matches = get_matching_topics(topics, topicFilter);
     assert(matches.size() == valid.size());
     for (uint i = 0; i < matches.size(); i++)
-        assert(valid[i] == matches[i]->name);
+    {
+        if (std::find(valid.begin(), valid.end(), matches[i]->name) == valid.end())
+            assert(1 == 0);
+    }
 }
 
 void test_trie6(trie<topic_t>& topics)
@@ -444,9 +457,9 @@ void test_trie6(trie<topic_t>& topics)
                                       "/a/bb/ccc"};
     std::vector<std::string> invalid = {"/1/a/bb/ccc", "2/a/bb/ccc/",
                                         "/a/bb/ccc/"};
-    for (auto el: invalid)
+    for (auto& el: invalid)
         add(el);
-    for (auto el: valid)
+    for (auto& el: valid)
         add(el);
 
     // test2 - return all topics that match prefix "+"
@@ -468,9 +481,9 @@ void test_trie7(trie<topic_t>& topics)
                                        "/22/a/333/bb/"};
     std::vector<std::string> invalid = {"x/a/333/bb/", "/y/a/333/bb",
                                         "z/22/a/3/33/bb/", "f/g/a/333/bb/ccc"};
-    for (auto el: invalid)
+    for (auto& el: invalid)
         add(el);
-    for (auto el: valid)
+    for (auto& el: valid)
         add(el);
 
     // test2 - return all topics that match prefix "+"
@@ -492,9 +505,9 @@ void test_trie8(trie<topic_t>& topics)
                                        "a/b/c"};
     std::vector<std::string> invalid = {"x/a/b/", "a/b",
                                         "/a/b/c", "f/g/h"};
-    for (auto el: invalid)
+    for (auto& el: invalid)
         add(el);
-    for (auto el: valid)
+    for (auto& el: valid)
         add(el);
 
     // test2 - return all topics that match prefix "+"
@@ -515,9 +528,9 @@ void test_trie9(trie<topic_t>& topics)
     std::vector<std::string> valid = {"a/b/", "a/b/cc/ddd/eeee/fffff/",
                                        "a/b/c", "/a/b/c", "/f/g/h/"};
     std::vector<std::string> invalid = {"cccc"};
-    for (auto el: invalid)
+    for (auto& el: invalid)
         add(el);
-    for (auto el: valid)
+    for (auto& el: valid)
         add(el);
 
     // test2 - return all topics that match prefix "+"
@@ -538,9 +551,9 @@ void test_trie10(trie<topic_t>& topics)
     std::vector<std::string> valid = {"1/a/22/b/333/", "4/a/5 5/b/66 6/ccc",
                                        "/a/1/b/22/c/ddd/ee/ff/gg/"};
     std::vector<std::string> invalid = {"a/1/b/2/c", "/1/a/2/b/c/", "1/a/22/b/333"};
-    for (auto el: invalid)
+    for (auto& el: invalid)
         add(el);
-    for (auto el: valid)
+    for (auto& el: valid)
         add(el);
 
     // test2 - return all topics that match prefix "+"
@@ -561,9 +574,9 @@ void test_trie11(trie<topic_t>& topics)
     std::vector<std::string> valid = {"/a/b", "/a/ccc",
                                        "/a/"};
     std::vector<std::string> invalid = {"a/b", "/a/b/", "/a/b/c"};
-    for (auto el: invalid)
+    for (auto& el: invalid)
         add(el);
-    for (auto el: valid)
+    for (auto& el: valid)
         add(el);
 
     // test2 - return all topics that match prefix "+"
@@ -584,9 +597,9 @@ void test_trie12(trie<topic_t>& topics)
     std::vector<std::string> valid = {"/a/b/c", "/a/ccc/dddd",
                                        "/a/e/ff", "/a/r/"};
     std::vector<std::string> invalid = {"a/b/c", "/a/b", "/a/b/c/"};
-    for (auto el: invalid)
+    for (auto& el: invalid)
         add(el);
-    for (auto el: valid)
+    for (auto& el: valid)
         add(el);
 
     // test2 - return all topics that match prefix "+"
@@ -628,6 +641,7 @@ void tests()
 
 #define CONNECT_BYTE  0x10
 #define PINGREQ_BYTE  0xC0
+#define SUBREQ_BYTE   0x80
 
 template <typename T>
 class MQTTClient: public tps::net::client_interface<T>
@@ -665,6 +679,16 @@ public:
         msg >> con.rc;
     }
 
+    void unpack_suback(tps::net::message<mqtt_header>& msg, mqtt_suback& suback)
+    {
+        suback.header.byte = msg.hdr.byte.byte;
+        msg >> suback.pkt_id;
+
+        uint16_t rcsBytes = msg.hdr.size - sizeof(suback.pkt_id);
+        suback.rcs.resize(rcsBytes);
+        msg >> suback.rcs;
+    }
+
     void publish()
     {
         static uint16_t pktID = 0;
@@ -685,7 +709,22 @@ public:
 
     void subscribe()
     {
+        mqtt_subscribe subreq(SUBREQ_BYTE);
 
+        static uint16_t pktID = 0;
+        subreq.pkt_id = pktID++;
+
+        subreq.tuples.resize(1);
+        mqtt_subscribe::tuple t;
+        t.topic = "/example";
+        t.topiclen = t.topic.size();
+        t.qos = AT_MOST_ONCE;
+
+        subreq.tuples.emplace_back(t);
+
+        tps::net::message<T> msg;
+        subreq.pack(msg);
+        this->send(std::move(msg));
     }
 
     void pingreq()
@@ -698,13 +737,13 @@ public:
     }
 };
 
-//#define CLIENT
+#define CLIENT
 
 int main()
 {
-    tests();
+//    tests();
+
     std::cout << "[" << std::this_thread::get_id() << "]MAIN THREAD\n";
-    return 0;
 
 #ifdef CLIENT
     MQTTClient<mqtt_header> client;
@@ -727,7 +766,7 @@ int main()
 
     mqtt_connect con(CONNECT_BYTE);
     con.vhdr.bits.clean_session = 1;
-    con.payload.client_id = "foo";
+    con.payload.client_id = "foo1";
     con.payload.keepalive = 0xffff;
 
     tps::net::message<mqtt_header>conmsg;
@@ -760,19 +799,26 @@ int main()
                     {
                         mqtt_connack resp;
                         client.unpack_connack(msg, resp);
-                        std::cout << "\t{CONNACK}\n" << resp;
+                        std::cout << "\n\t{CONNACK}\n" << resp;
+                        break;
+                    }
+                    case packet_type::SUBACK:
+                    {
+                        mqtt_suback resp;
+                        client.unpack_suback(msg, resp);
+                        std::cout << "\n\t{SUBACK}\n" << resp;
                         break;
                     }
                     case packet_type::PUBACK:
                     {
                         mqtt_puback resp;
                         resp.unpack(msg);
-                        std::cout << "\t{PUBACK}\n" << resp;
+                        std::cout << "\n\t{PUBACK}\n" << resp;
                         break;
                     }
                     case packet_type::PINGRESP:
                     {
-                        std::cout << "\t{PINGRESP}\n";
+                        std::cout << "\n\t{PINGRESP}\n";
                         break;
                     }
                     default:

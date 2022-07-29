@@ -57,7 +57,7 @@ namespace tps
                 if (thrContext.joinable())
                     thrContext.join();
 
-                m_connection.release();
+                m_connection.reset();
             }
 
             bool is_connected()

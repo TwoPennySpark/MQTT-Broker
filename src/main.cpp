@@ -672,6 +672,26 @@ public:
         msg << con.payload.client_id;
     }
 
+    void pack_subscribe(mqtt_subscribe& sub, tps::net::message<mqtt_header>& msg)
+    {
+        uint size = 0;
+
+        msg.hdr.byte = sub.header;
+
+        msg << sub.pkt_id;
+        size += sizeof(sub.pkt_id);
+
+        for (auto& tuple: sub.tuples)
+        {
+            msg << tuple.topiclen;
+            msg << tuple.topic;
+            msg << tuple.qos;
+            size += sizeof(tuple.topiclen) + tuple.topic.size() + sizeof(tuple.qos);
+        }
+
+        msg.writeHdrSize += mqtt_encode_length(msg, size);
+    }
+
     void unpack_connack(tps::net::message<mqtt_header>& msg, mqtt_connack& con)
     {
         con.header.byte = msg.hdr.byte.byte;
@@ -710,11 +730,11 @@ public:
     void subscribe()
     {
         mqtt_subscribe subreq(SUBREQ_BYTE);
+        subreq.header.bits.qos = 1; // [MQTT-3.8.1-1]
 
         static uint16_t pktID = 0;
         subreq.pkt_id = pktID++;
 
-        subreq.tuples.resize(1);
         mqtt_subscribe::tuple t;
         t.topic = "/example";
         t.topiclen = t.topic.size();
@@ -723,7 +743,7 @@ public:
         subreq.tuples.emplace_back(t);
 
         tps::net::message<T> msg;
-        subreq.pack(msg);
+        pack_subscribe(subreq, msg);
         this->send(std::move(msg));
     }
 
@@ -737,12 +757,11 @@ public:
     }
 };
 
-#define CLIENT
+//#define CLIENT
 
 int main()
 {
 //    tests();
-
     std::cout << "[" << std::this_thread::get_id() << "]MAIN THREAD\n";
 
 #ifdef CLIENT
@@ -766,13 +785,14 @@ int main()
 
     mqtt_connect con(CONNECT_BYTE);
     con.vhdr.bits.clean_session = 1;
-    con.payload.client_id = "foo1";
+    con.payload.client_id = "foo5";
     con.payload.keepalive = 0xffff;
 
     tps::net::message<mqtt_header>conmsg;
     client.pack_connect(con, conmsg);
     client.send(std::move(conmsg));
 
+    std::cout << "~~~~~~" << con.payload.client_id << "~~~~~~\n";
     while (1)
     {
         if (client.is_connected())
@@ -809,6 +829,13 @@ int main()
                         std::cout << "\n\t{SUBACK}\n" << resp;
                         break;
                     }
+                    case packet_type::PUBLISH:
+                    {
+                        mqtt_publish resp;
+                        resp.unpack(msg);
+                        std::cout << "\n\t{PUBLISH}\n" << resp;
+                        break;
+                    }
                     case packet_type::PUBACK:
                     {
                         mqtt_puback resp;
@@ -830,7 +857,7 @@ int main()
         usleep(100*1000);
     }
 #else
-    server<mqtt_header> broker(5000);
+    server broker(5000);
     broker.start();
     broker.update();
 #endif

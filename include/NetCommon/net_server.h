@@ -20,7 +20,7 @@ namespace tps
 
             }
 
-            ~server_interface()
+            virtual ~server_interface()
             {
                 stop();
             }
@@ -96,7 +96,7 @@ namespace tps
                 }
                 else
                 {
-                    on_client_disconnect(client);
+//                    on_client_disconnect(client);
                     client.reset();
                     m_deqConnections.erase(
                                 std::remove(m_deqConnections.begin(), m_deqConnections.end(), client), m_deqConnections.end());
@@ -116,7 +116,7 @@ namespace tps
                     }
                     else
                     {
-                        on_client_disconnect(client);
+//                        on_client_disconnect(client);
                         client.reset();
                         bInvalidClientExists = true;
                     }
@@ -146,10 +146,6 @@ namespace tps
                 return true;
             }
 
-            virtual void on_client_disconnect(std::shared_ptr<connection<T>> client)
-            {
-
-            }
 
             virtual void on_message(std::shared_ptr<connection<T>> client, message<T>& msg)
             {
@@ -158,6 +154,11 @@ namespace tps
 
         public:
             virtual bool on_first_message(std::shared_ptr<connection<T>> client, message<T>& msg)
+            {
+
+            }
+
+            virtual void on_client_disconnect(std::shared_ptr<connection<T>> client)
             {
 
             }

@@ -16,7 +16,7 @@ client::~client()
     printf("CLIENT DELETED\n");
 }
 
-void ::core::delete_client(std::shared_ptr<client_t> client)
+void ::core::delete_client(std::shared_ptr<client_t>& client)
 {
     if (client->will)
     {

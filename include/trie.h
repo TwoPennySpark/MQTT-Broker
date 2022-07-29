@@ -49,12 +49,12 @@ public:
         // Move to the end of the prefix first
         for (auto key: prefix)
         {
-            trie_node<T>* child = retnode->children[key].get();
-
+            auto it = retnode->children.find(key);
             // No key with the full prefix in the trie
-            if (!child)
+            if (it == retnode->children.end())
                 return nullptr;
-            retnode = child;
+
+            retnode = it->second.get();
         }
 
         return retnode;

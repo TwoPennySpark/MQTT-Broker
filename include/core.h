@@ -43,7 +43,7 @@ struct session
 //template <typename T>
 typedef struct client
 {
-    client(std::shared_ptr<tps::net::connection<mqtt_header>>& _netClient): netClient(_netClient){}
+    client(std::shared_ptr<tps::net::connection<mqtt_header>> _netClient): netClient(_netClient){}
     ~client();
     bool active;
     std::string clientID;
@@ -59,18 +59,18 @@ typedef struct client
     std::string password;
 
     uint16_t keepalive;
-    std::shared_ptr<tps::net::connection<mqtt_header>>& netClient;
+    std::shared_ptr<tps::net::connection<mqtt_header>> netClient;
 }client_t;
 
 typedef struct subscriber
 {
-    subscriber(uint8_t _qos, client_t& _client): qos(_qos), client(_client){}
+    subscriber(uint8_t _qos, std::shared_ptr<client_t> _client): qos(_qos), client(_client){}
     uint8_t qos;
-    client_t& client;
+    std::shared_ptr<client_t> client;
 
     bool operator<(const subscriber& s) const
     {
-        return s.client.clientID > client.clientID ? true : false;
+        return s.client->clientID > client->clientID ? true : false;
     }
     struct compare
     {
@@ -89,6 +89,7 @@ typedef struct topic
     std::string retainedMsg;
     uint8_t retainedQOS;
     std::set<std::shared_ptr<subscriber>, subscriber::compare> subscribers;
+//    std::vector<std::shared_ptr<subscriber_t>> subscribers;
 
     ~topic()
     {
@@ -103,7 +104,7 @@ typedef struct core
                                        std::shared_ptr<client_t>> clients;
     std::unordered_map<std::string, std::shared_ptr<client_t>> clientsIDs;
 
-    void delete_client(std::shared_ptr<client_t> client);
+    void delete_client(std::shared_ptr<client_t> &client);
 
     std::vector<std::shared_ptr<topic_t>> get_matching_topics(const std::string &topicFilter)
     {

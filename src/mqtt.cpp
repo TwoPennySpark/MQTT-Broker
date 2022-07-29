@@ -48,7 +48,7 @@ std::ostream& operator<<(std::ostream& os, const mqtt_header& pkt)
 std::ostream& operator<<(std::ostream& os, const mqtt_packet& pkt)
 {
     os << pkt.header;
-    os << "\t=====================END BODY=====================\n\n";
+    os << "\t================END BODY================\n\n";
     return os;
 }
 
@@ -121,7 +121,7 @@ std::ostream& operator<<(std::ostream &os, const mqtt_ack &pkt)
 {
     os << pkt.header;
     os << "\tPKT ID: " << pkt.pkt_id << std::endl;
-    os << "\t=====================END BODY=====================\n\n";
+    os << "\t================END BODY================\n\n";
 
     return os;
 }

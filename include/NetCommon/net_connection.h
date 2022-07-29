@@ -56,7 +56,7 @@ namespace tps
                     {
                         if (!ec)
                         {
-                            read_header();
+                            read_header(nullptr);
                         }
                         else
                         {
@@ -145,10 +145,10 @@ namespace tps
             }
 
             // ASYNC
-            void read_header()
+            void read_header(server_interface<T>* server)
             {
                 asio::async_read(m_socket, asio::buffer(&m_msgTempIn.hdr, sizeof(m_msgTempIn.hdr)+1), decode_len(m_msgTempIn),
-                    [this](const std::error_code& ec, std::size_t)
+                    [this, server](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
@@ -156,36 +156,40 @@ namespace tps
                             {
                                 printf("HDR:%d SIZE:%d\n", m_msgTempIn.hdr.byte.byte, m_msgTempIn.hdr.size);
                                 m_msgTempIn.body.resize(m_msgTempIn.hdr.size);
-                                read_body();
+                                read_body(server);
                             }
                             else
                             {
-                                add_to_incoming_message_queue();
+                                add_to_incoming_message_queue(server);
                             }
                         }
                         else
                         {
                             std::cout << "[" << m_id << "] Read Header Fail: " << ec.message() << "\n";
                             m_socket.close();
+                            if (m_nOwnerType == owner::server)
+                                server->on_client_disconnect(this->shared_from_this());
                         }
                     });
             }
 
             // ASYNC
-            void read_body()
+            void read_body(server_interface<T>* server)
             {
                 asio::async_read(m_socket, asio::buffer(m_msgTempIn.body.data(), m_msgTempIn.body.size()),
-                    [this](const std::error_code& ec, std::size_t len)
+                    [this, server](const std::error_code& ec, std::size_t len)
                     {
                         if (!ec)
                         {
                             printf("READ BODY:%ld\n", len);
-                            add_to_incoming_message_queue();
+                            add_to_incoming_message_queue(server);
                         }
                         else
                         {
                             std::cout << "[" << m_id << "] Read Body Fail\n";
                             m_socket.close();
+                            if (m_nOwnerType == owner::server)
+                                server->on_client_disconnect(this->shared_from_this());
                         }
                     });
             }
@@ -238,7 +242,7 @@ namespace tps
                     });
             }
 
-            void add_to_incoming_message_queue()
+            void add_to_incoming_message_queue(server_interface<T>* server)
             {
 //                std::cout << "[" << std::this_thread::get_id() << "]add_to_incoming_message_queue BEFORE\n";
 
@@ -248,7 +252,7 @@ namespace tps
                     m_qMessageIn.push_back(owned_message<T>({nullptr, std::move(m_msgTempIn)})); // client has only 1 connection, this connection will own all of incoming msgs
 
 //                std::cout << "[" << std::this_thread::get_id() << "]add_to_incoming_message_queue AFTER\n";
-                read_header();
+                read_header(server);
             }
 
             // ASYNC
@@ -270,7 +274,7 @@ namespace tps
                             {
                                 if (server->on_first_message(this->shared_from_this(), m_msgTempIn))
                                 {
-                                    add_to_incoming_message_queue();
+                                    add_to_incoming_message_queue(server);
                                 }
                                 else
                                 {
@@ -298,7 +302,7 @@ namespace tps
                             printf("RFBODY:%ld\n", len);
                             if (server->on_first_message(this->shared_from_this(), m_msgTempIn))
                             {
-                                add_to_incoming_message_queue();
+                                add_to_incoming_message_queue(server);
                             }
                             else
                             {

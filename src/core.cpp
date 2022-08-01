@@ -1,20 +1,7 @@
-#include <string.h>
-#include <stdlib.h>
+#include "core.h"
 #include <memory>
 #include <boost/algorithm/string.hpp>
-#include "core.h"
 #include "NetCommon/net_connection.h"
-
-client::~client()
-{
-    // reach every topic and delete this client subscription
-    for (auto& el: session.subscriptions)
-    {
-//        el->del_subscriber(this, session.cleanSession);
-        el.reset();
-    }
-    printf("CLIENT DELETED\n");
-}
 
 void ::core::delete_client(std::shared_ptr<client_t>& client)
 {
@@ -32,3 +19,20 @@ void ::core::delete_client(std::shared_ptr<client_t>& client)
     else
         client->active = false;
 }
+
+bool topic::unsub(std::shared_ptr<client> &client)
+{
+    for (auto it = subscribers.begin(); it != subscribers.end(); it++)
+    {
+        if (it->first == client)
+        {
+            if (it->first->session.cleanSession)
+                subscribers.erase(it);
+            else
+                it->first->active = false;
+            return true;
+        }
+    }
+    return false;
+}
+

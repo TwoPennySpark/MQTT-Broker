@@ -85,12 +85,12 @@ struct mqtt_packet
     virtual ~mqtt_packet() = default;
 
     template<typename T, typename... Args>
-    static std::shared_ptr<T> create(uint8_t hdr, Args... args)
+    static std::unique_ptr<T> create(uint8_t hdr, Args... args)
     {
-        return std::shared_ptr<T>(new T(hdr, args...));
+        return std::unique_ptr<T>(new T(hdr, args...));
     }
 
-    static std::shared_ptr<mqtt_packet> create(tps::net::message<mqtt_header>& msg);
+    static std::unique_ptr<mqtt_packet> create(tps::net::message<mqtt_header>& msg);
 
     virtual void pack(tps::net::message<mqtt_header>&);
     virtual void unpack(tps::net::message<mqtt_header>&);
@@ -194,6 +194,8 @@ struct mqtt_unsubscribe: public mqtt_packet
         std::string topic;
     };
     std::vector<tuple> tuples;
+
+    friend std::ostream& operator<< (std::ostream& os, const mqtt_unsubscribe& pkt);
 
     void unpack(tps::net::message<mqtt_header>& msg) override;
 };

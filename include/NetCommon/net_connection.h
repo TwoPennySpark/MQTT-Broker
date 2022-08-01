@@ -24,7 +24,7 @@ namespace tps
             };
 
             connection(owner parent, asio::io_context& asioContext, asio::ip::tcp::socket socket, tsqueue<owned_message<T>>& qIn):
-                       m_nOwnerType(parent), m_asioContext(asioContext), m_socket(std::move(socket)), m_qMessageIn(qIn)
+                       m_socket(std::move(socket)), m_asioContext(asioContext), m_qMessageIn(qIn), m_nOwnerType(parent)
             {
 
             }
@@ -83,18 +83,28 @@ namespace tps
                 return m_id;
             }
 
+            void shutdown_cleanup(server_interface<T>* server)
+            {
+                m_socket.close();
+                if (m_nOwnerType == owner::server)
+                {
+                    server->on_client_disconnect(this->shared_from_this());
+                    server->delete_client(this->shared_from_this());
+                }
+            }
+
             // ASYNC
             template <typename Type>
-            void send(Type&& msg)
+            void send(Type&& msg, server_interface<T>* server)
             {
 //                std::cout << "[" << std::this_thread::get_id() << "]SEND BEFORE\n";
-                asio::post(m_asioContext, [this, msg = std::forward<Type>(msg)]() mutable
+                asio::post(m_asioContext, [this, server, msg = std::forward<Type>(msg)]() mutable
                 {
 //                    printf("SEND %d header bytes + 0x%x body bytes: HDR:0x%x\n", msg.writeHdrSize, msg.hdr.size, msg.hdr.byte.byte);
                     bool bWritingMessage = !m_qMessageOut.empty();
                     m_qMessageOut.push_back(std::forward<Type>(msg));
                     if (!bWritingMessage)
-                        write_header();
+                        write_header(server);
                 });
 //                std::cout << "[" << std::this_thread::get_id() << "]SEND AFTER\n";
             }
@@ -104,7 +114,7 @@ namespace tps
             public:
                 decode_len_t(message<T>& _m_msgTempIn): m_msgTempIn(_m_msgTempIn){}
 
-                std::size_t operator()(const std::error_code& ec, std::size_t size)
+                std::size_t operator()(const std::error_code& ec, std::size_t)
                 {
                     static uint32_t len = 0;
                     static uint8_t lenIndex = 0;
@@ -166,9 +176,7 @@ namespace tps
                         else
                         {
                             std::cout << "[" << m_id << "] Read Header Fail: " << ec.message() << "\n";
-                            m_socket.close();
-                            if (m_nOwnerType == owner::server)
-                                server->on_client_disconnect(this->shared_from_this());
+                            shutdown_cleanup(server);
                         }
                     });
             }
@@ -187,57 +195,55 @@ namespace tps
                         else
                         {
                             std::cout << "[" << m_id << "] Read Body Fail\n";
-                            m_socket.close();
-                            if (m_nOwnerType == owner::server)
-                                server->on_client_disconnect(this->shared_from_this());
+                            shutdown_cleanup(server);
                         }
                     });
             }
 
             // ASYNC
-            void write_header()
+            void write_header(server_interface<T>* server)
             {
                 asio::async_write(m_socket, asio::buffer(&m_qMessageOut.front().hdr,
                                                          m_qMessageOut.front().writeHdrSize),
-                    [this](const std::error_code& ec, std::size_t)
+                    [this, server](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
                             if (m_qMessageOut.front().body.size() > 0)
                             {
-                                write_body();
+                                write_body(server);
                             }
                             else
                             {
                                 m_qMessageOut.pop_front();
                                 if (!m_qMessageOut.empty())
-                                    write_header();
+                                    write_header(server);
                             }
                         }
                         else
                         {
                             std::cout << "[" << m_id << "] Write Header Fail: " << ec.message() << "\n";
-                            m_socket.close();
+                            shutdown_cleanup(server);
                         }
                     });
             }
 
             // ASYNC
-            void write_body()
+            void write_body(server_interface<T>* server)
             {
                 asio::async_write(m_socket, asio::buffer(m_qMessageOut.front().body.data(), m_qMessageOut.front().body.size()),
-                    [this](const std::error_code& ec, std::size_t)
+                    [this, server](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
                                 m_qMessageOut.pop_front();
                                 if (!m_qMessageOut.empty())
-                                    write_header();
+                                    write_header(server);
                         }
                         else
                         {
                             std::cout << "[" << m_id << "] Write Body Fail\n";
-                            m_socket.close();
+                            shutdown_cleanup(server);
                         }
                     });
             }

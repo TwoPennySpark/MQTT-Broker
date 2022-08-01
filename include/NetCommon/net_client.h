@@ -46,7 +46,7 @@ namespace tps
                 return true;
             }
 
-            bool disconnect()
+            void disconnect()
             {
                 if (is_connected())
                 {
@@ -72,7 +72,7 @@ namespace tps
             void send(Type&& msg)
             {
                 if (is_connected())
-                    m_connection->send(std::forward<Type>(msg));
+                    m_connection->send(std::forward<Type>(msg), nullptr);
             }
 
             tsqueue<owned_message<T>>& incoming()

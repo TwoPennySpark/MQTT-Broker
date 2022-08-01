@@ -5,6 +5,7 @@
 #include <set>
 #include <unordered_map>
 #include <memory>
+#include <iostream>
 #include <boost/algorithm/string.hpp>
 #include "trie.h"
 #include "mqtt.h"
@@ -22,13 +23,7 @@ namespace tps
 
 struct session
 {
-    void clear()
-    {
-        subscriptions.clear();
-    }
-
     bool cleanSession;
-    std::list<std::shared_ptr<topic_t>> subscriptions;
     std::set<uint16_t> unregPuback;
     std::set<uint16_t> unregPubrec;
     std::set<uint16_t> unregPubrel;
@@ -44,7 +39,7 @@ struct session
 typedef struct client
 {
     client(std::shared_ptr<tps::net::connection<mqtt_header>> _netClient): netClient(_netClient){}
-    ~client();
+    ~client() {std::cout << "CLIENT DELETED:" << clientID << "\n";}
     bool active;
     std::string clientID;
     struct session session;
@@ -62,39 +57,17 @@ typedef struct client
     std::shared_ptr<tps::net::connection<mqtt_header>> netClient;
 }client_t;
 
-typedef struct subscriber
-{
-    subscriber(uint8_t _qos, std::shared_ptr<client_t> _client): qos(_qos), client(_client){}
-    uint8_t qos;
-    std::shared_ptr<client_t> client;
-
-    bool operator<(const subscriber& s) const
-    {
-        return s.client->clientID > client->clientID ? true : false;
-    }
-    struct compare
-    {
-        bool operator() (const std::shared_ptr<subscriber>& a,
-                         const std::shared_ptr<subscriber>& b) const
-        {
-            return *a < *b;
-        }
-    };
-}subscriber_t;
-
 typedef struct topic
 {
     topic(const std::string& _name): name(_name){}
     std::string name;
     std::string retainedMsg;
     uint8_t retainedQOS;
-    std::set<std::shared_ptr<subscriber>, subscriber::compare> subscribers;
-//    std::vector<std::shared_ptr<subscriber_t>> subscribers;
+    std::vector<std::pair<std::shared_ptr<client_t>, uint8_t>> subscribers;
 
-    ~topic()
-    {
-        printf("Topic Deleted:%s\n", name.data());
-    }
+    ~topic() {std::cout << "Topic Deleted:" << name << "\n";}
+
+    bool unsub(std::shared_ptr<client>& client);
 }topic_t;
 
 typedef struct core

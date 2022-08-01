@@ -88,43 +88,43 @@ namespace tps
             template <typename Type>
             void message_client(std::shared_ptr<connection<T>> client, Type&& msg)
             {
-                if (client && client->is_connected())
+//                if (client && client->is_connected())
                 {
 //                    std::cout << "[" << std::this_thread::get_id() << "]message_client BEFORE\n";
-                    client->send(std::forward<Type>(msg));
+                    client->send(std::forward<Type>(msg), this);
 //                    std::cout << "[" << std::this_thread::get_id() << "]message_client AFTER\n";
                 }
-                else
+//                else
                 {
 //                    on_client_disconnect(client);
-                    client.reset();
-                    m_deqConnections.erase(
-                                std::remove(m_deqConnections.begin(), m_deqConnections.end(), client), m_deqConnections.end());
+//                    client.reset();
+//                    m_deqConnections.erase(
+//                                std::remove(m_deqConnections.begin(), m_deqConnections.end(), client), m_deqConnections.end());
                 }
             }
 
             void message_all_clients(const message<T>& msg, std::shared_ptr<connection<T>> pIgnoreClient = nullptr)
             {
-                bool bInvalidClientExists = false;
+//                bool bInvalidClientExists = false;
 
                 for (auto& client: m_deqConnections)
                 {
-                    if (client && client->is_connected())
+//                    if (client && client->is_connected())
                     {
                         if (client != pIgnoreClient)
-                            client->send(msg);
+                            client->send(msg, this);
                     }
-                    else
+//                    else
                     {
 //                        on_client_disconnect(client);
-                        client.reset();
-                        bInvalidClientExists = true;
+//                        client.reset();
+//                        bInvalidClientExists = true;
                     }
                 }
 
-                if (bInvalidClientExists)
-                    m_deqConnections.erase(
-                                std::remove(m_deqConnections.begin(), m_deqConnections.end(), nullptr), m_deqConnections.end());
+//                if (bInvalidClientExists)
+//                    m_deqConnections.erase(
+//                                std::remove(m_deqConnections.begin(), m_deqConnections.end(), nullptr), m_deqConnections.end());
             }
 
             void update(size_t nMaxMessages = std::numeric_limits<size_t>::max())
@@ -140,25 +140,31 @@ namespace tps
                 }
             }
 
+            void delete_client(std::shared_ptr<connection<T>> client)
+            {
+                m_deqConnections.erase(
+                            std::remove(m_deqConnections.begin(), m_deqConnections.end(), client), m_deqConnections.end());
+            }
+
         protected:
-            virtual bool on_client_connect(std::shared_ptr<connection<T>> client)
+            virtual bool on_client_connect(std::shared_ptr<connection<T>>)
             {
                 return true;
             }
 
 
-            virtual void on_message(std::shared_ptr<connection<T>> client, message<T>& msg)
+            virtual void on_message(std::shared_ptr<connection<T>>, message<T>&)
             {
 
             }
 
         public:
-            virtual bool on_first_message(std::shared_ptr<connection<T>> client, message<T>& msg)
+            virtual bool on_first_message(std::shared_ptr<connection<T>>, message<T>&)
             {
-
+                return true;
             }
 
-            virtual void on_client_disconnect(std::shared_ptr<connection<T>> client)
+            virtual void on_client_disconnect(std::shared_ptr<connection<T>>)
             {
 
             }

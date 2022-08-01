@@ -639,9 +639,10 @@ void tests()
 //    test_pack_unpack();
 }
 
-#define CONNECT_BYTE  0x10
-#define PINGREQ_BYTE  0xC0
-#define SUBREQ_BYTE   0x80
+#define CONNECT_BYTE 0x10
+#define SUBREQ_BYTE  0x80
+#define UNSUB_BYTE   0xA0
+#define PINGREQ_BYTE 0xC0
 
 template <typename T>
 class MQTTClient: public tps::net::client_interface<T>
@@ -687,6 +688,25 @@ public:
             msg << tuple.topic;
             msg << tuple.qos;
             size += sizeof(tuple.topiclen) + tuple.topic.size() + sizeof(tuple.qos);
+        }
+
+        msg.writeHdrSize += mqtt_encode_length(msg, size);
+    }
+
+    void pack_unsubscribe(mqtt_unsubscribe& unsub, tps::net::message<mqtt_header>& msg)
+    {
+        uint size = 0;
+
+        msg.hdr.byte = unsub.header;
+
+        msg << unsub.pkt_id;
+        size += sizeof(unsub.pkt_id);
+
+        for (auto& tuple: unsub.tuples)
+        {
+            msg << tuple.topiclen;
+            msg << tuple.topic;
+            size += sizeof(tuple.topiclen) + tuple.topic.size();
         }
 
         msg.writeHdrSize += mqtt_encode_length(msg, size);
@@ -739,11 +759,27 @@ public:
         t.topic = "/example";
         t.topiclen = t.topic.size();
         t.qos = AT_MOST_ONCE;
-
         subreq.tuples.emplace_back(t);
 
         tps::net::message<T> msg;
         pack_subscribe(subreq, msg);
+        this->send(std::move(msg));
+    }
+
+    void unsubscribe()
+    {
+        mqtt_unsubscribe unsub(UNSUB_BYTE);
+
+        static uint16_t pktID = 0;
+        unsub.pkt_id = pktID++;
+
+        mqtt_unsubscribe::tuple t;
+        t.topic = "/example";
+        t.topiclen = t.topic.size();
+        unsub.tuples.emplace_back(t);
+
+        tps::net::message<T> msg;
+        pack_unsubscribe(unsub, msg);
         this->send(std::move(msg));
     }
 
@@ -757,7 +793,7 @@ public:
     }
 };
 
-//#define CLIENT
+#define CLIENT
 
 int main()
 {
@@ -785,7 +821,7 @@ int main()
 
     mqtt_connect con(CONNECT_BYTE);
     con.vhdr.bits.clean_session = 1;
-    con.payload.client_id = "foo5";
+    con.payload.client_id = "foo2";
     con.payload.keepalive = 0xffff;
 
     tps::net::message<mqtt_header>conmsg;
@@ -803,8 +839,9 @@ int main()
                 {
                     case 1: client.publish(); break;
                     case 2: client.subscribe(); break;
-                    case 3: client.pingreq(); break;
-                    case 4: return 0;
+                    case 3: client.unsubscribe(); break;
+                    case 4: client.pingreq(); break;
+                    case 5: return 0;
                 }
             }
 
@@ -827,6 +864,13 @@ int main()
                         mqtt_suback resp;
                         client.unpack_suback(msg, resp);
                         std::cout << "\n\t{SUBACK}\n" << resp;
+                        break;
+                    }
+                    case packet_type::UNSUBACK:
+                    {
+                        mqtt_unsuback resp;
+                        resp.unpack(msg);
+                        std::cout << "\n\t{UNSUBACK}\n" << resp;
                         break;
                     }
                     case packet_type::PUBLISH:

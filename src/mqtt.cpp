@@ -104,13 +104,25 @@ std::ostream& operator<<(std::ostream &os, const mqtt_subscribe &pkt)
     return os;
 }
 
+std::ostream& operator<<(std::ostream &os, const mqtt_unsubscribe &pkt)
+{
+    os << pkt.header;
+    os << "\tPKT ID: " << pkt.pkt_id << std::endl;
+    for (auto& t: pkt.tuples)
+        os << "\tTOPIC[" << t.topiclen << "]: "
+           << "\"" << t.topic << "\"" << std::endl;
+    os << "\t================END BODY================\n\n";
+
+    return os;
+}
+
 std::ostream& operator<<(std::ostream& os, const mqtt_suback& pkt)
 {
     os << pkt.header;
     os << "\tPKT ID: " << pkt.pkt_id << std::endl;
     os << "\tRCS: ";
     for (auto rc: pkt.rcs)
-        os << rc << " ";
+        os << std::to_string(rc) << " ";
     os << std::endl;
     os << "\t================END BODY================\n\n";
 
@@ -126,9 +138,9 @@ std::ostream& operator<<(std::ostream &os, const mqtt_ack &pkt)
     return os;
 }
 
-std::shared_ptr<mqtt_packet> mqtt_packet::create(tps::net::message<mqtt_header>& msg)
+std::unique_ptr<mqtt_packet> mqtt_packet::create(tps::net::message<mqtt_header>& msg)
 {
-    std::shared_ptr<mqtt_packet> ret;
+    std::unique_ptr<mqtt_packet> ret;
     uint8_t byte = msg.hdr.byte.byte;
 
     switch (packet_type(byte >> 4))

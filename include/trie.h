@@ -89,39 +89,39 @@ public:
             recursive_apply_data_until(node, until, func);
     }
 
-//    void erase(const std::string& prefix)
-//    {
-//        if (prefix.size())
-//            recursive_erase(root, prefix, 0);
-//    }
+    void erase(const std::string& topicName)
+    {
+        if (topicName.size())
+            recursive_erase(root, topicName, 0);
+    }
 
 private:
-//    bool recursive_erase(trie_node<T>& node, const std::string& key, uint16_t index)
-//    {
-//        if (index == key.size())
-//        {
-//            if (node.data)
-//            {
-//                node.data = nullptr;
-//                // if there is no more children delete node
-//                if (!node.children_num)
-//                    return true;
-//            }
-//        }
-//        else
-//        {
-//            uint next_letter = key[index]-32;
-//            index++;
-//            if (node.children[next_letter])
-//                if (recursive_erase(*node.children[next_letter], key, index))
-//                {
-//                    node.children[next_letter] = nullptr;
-//                    if (!(--node.children_num))
-//                        return true;
-//                }
-//        }
-//        return false;
-//    }
+    bool recursive_erase(trie_node<T>& node, const std::string& key, uint16_t index)
+    {
+        if (index == key.size())
+        {
+            if (node.data)
+            {
+                node.data.reset();
+                // if there is no more children delete node
+                if (!node.children.size())
+                    return true;
+            }
+        }
+        else
+        {
+            char next_letter = key[index++];
+            auto it = node.children.find(next_letter);
+            if (it != node.children.end())
+                if (recursive_erase(*node.children[next_letter], key, index))
+                {
+                    node.children.erase(next_letter);
+                    if (!node.children.size() && !node.data)
+                        return true;
+                }
+        }
+        return false;
+    }
 
     void recursive_apply_func(trie_node<T> *node, std::function<void(trie_node<T> *)> func)
     {

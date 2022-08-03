@@ -25,8 +25,10 @@ struct session
 {
     bool cleanSession;
     std::set<uint16_t> unregPuback;
-    std::set<uint16_t> unregPubrec;
-    std::set<uint16_t> unregPubrel;
+    // first - expected pubrec pkt ID, second - dup (number of already sent pubrels using this pkt ID)
+    std::unordered_map<uint16_t, uint8_t> unregPubrec;
+    // first - expected pubrel pkt ID, second - dup (number of already sent pubcomps using this pkt ID)
+    std::unordered_map<uint16_t, uint8_t> unregPubrel;
     std::set<uint16_t> unregPubcomp;
     // TODO add pending confirmed messages
 };
@@ -40,6 +42,7 @@ typedef struct client
 {
     client(std::shared_ptr<tps::net::connection<mqtt_header>> _netClient): netClient(_netClient){}
     ~client() {std::cout << "CLIENT DELETED:" << clientID << "\n";}
+
     bool active;
     std::string clientID;
     struct session session;
@@ -63,7 +66,7 @@ typedef struct topic
     std::string name;
     std::string retainedMsg;
     uint8_t retainedQOS;
-    std::vector<std::pair<std::shared_ptr<client_t>, uint8_t>> subscribers;
+    std::vector<std::pair<client_t&, uint8_t>> subscribers;
 
     ~topic() {std::cout << "Topic Deleted:" << name << "\n";}
 

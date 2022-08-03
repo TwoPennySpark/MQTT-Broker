@@ -2,7 +2,7 @@
 #define NET_SERVER_H
 
 #include "net_common.h"
-#include "net_connection.h"
+    #include "net_connection.h"
 #include "net_message.h"
 #include "net_tsqueue.h"
 
@@ -153,7 +153,7 @@ namespace tps
             }
 
 
-            virtual void on_message(std::shared_ptr<connection<T>>, message<T>&)
+            virtual void on_message(std::shared_ptr<connection<T>>&, message<T>&)
             {
 
             }
@@ -170,7 +170,6 @@ namespace tps
             }
 
         protected:
-
             tsqueue<owned_message<T>> m_qMessagesIn;
 
             asio::io_context m_asioContext;

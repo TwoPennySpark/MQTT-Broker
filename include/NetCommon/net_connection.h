@@ -69,8 +69,7 @@ namespace tps
             // ASYNC
             void disconnect()
             {
-                if (is_connected())
-                    asio::post(m_asioContext, [this](){m_socket.close();});
+                asio::post(m_asioContext, [this](){if (m_socket.is_open()) m_socket.close();});
             }
 
             bool is_connected() const
@@ -271,8 +270,6 @@ namespace tps
                         {
                             if (m_msgTempIn.hdr.size > 0)
                             {
-                                printf("RFH HDR:%d SIZE:%d %d\n", m_msgTempIn.hdr.byte.byte,
-                                       m_msgTempIn.hdr.size, m_msgTempIn.hdr.size);
                                 m_msgTempIn.body.resize(m_msgTempIn.hdr.size);
                                 read_first_body(server);
                             }
@@ -286,6 +283,7 @@ namespace tps
                                 {
                                     std::cout << "[" << m_id << "] Invalid First Msg Received\n";
                                     m_socket.close();
+                                    server->delete_client(this->shared_from_this());
                                 }
                             }
                         }
@@ -293,6 +291,7 @@ namespace tps
                         {
                             std::cout << "[" << m_id << "] Read First Header Fail: " << ec.message() << "\n";
                             m_socket.close();
+                            server->delete_client(this->shared_from_this());
                         }
                     });
             }
@@ -301,11 +300,10 @@ namespace tps
             void read_first_body(server_interface<T>* server)
             {
                 asio::async_read(m_socket, asio::buffer(m_msgTempIn.body.data(), m_msgTempIn.body.size()),
-                    [this, server](const std::error_code& ec, std::size_t len)
+                    [this, server](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
-                            printf("RFBODY:%ld\n", len);
                             if (server->on_first_message(this->shared_from_this(), m_msgTempIn))
                             {
                                 add_to_incoming_message_queue(server);
@@ -314,12 +312,14 @@ namespace tps
                             {
                                 std::cout << "[" << m_id << "] Invalid First Msg Received\n";
                                 m_socket.close();
+                                server->delete_client(this->shared_from_this());
                             }
                         }
                         else
                         {
                             std::cout << "[" << m_id << "] Read First Body Fail\n";
                             m_socket.close();
+                            server->delete_client(this->shared_from_this());
                         }
                     });
             }

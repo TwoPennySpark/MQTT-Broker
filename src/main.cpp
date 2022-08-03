@@ -793,7 +793,7 @@ public:
     }
 };
 
-#define CLIENT
+//#define CLIENT
 
 int main()
 {

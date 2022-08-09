@@ -24,34 +24,33 @@ namespace tps
 struct session
 {
     bool cleanSession;
+
+    // key - topic name, value - ref to topic struct
+    std::unordered_map<std::string, topic_t&> subscriptions;
+
     std::set<uint16_t> unregPuback;
     // first - expected pubrec pkt ID, second - dup (number of already sent pubrels using this pkt ID)
     std::unordered_map<uint16_t, uint8_t> unregPubrec;
     // first - expected pubrel pkt ID, second - dup (number of already sent pubcomps using this pkt ID)
     std::unordered_map<uint16_t, uint8_t> unregPubrel;
     std::set<uint16_t> unregPubcomp;
-    // TODO add pending confirmed messages
+
+    std::vector<tps::net::message<mqtt_header>> savedMsgs;
 };
 
-/*
- * Wrapper structure around a connected client, each client can be a publisher
- * or a subscriber, it can be used to track sessions too
- */
-//template <typename T>
 typedef struct client
 {
     client(std::shared_ptr<tps::net::connection<mqtt_header>> _netClient): netClient(_netClient){}
-    ~client() {std::cout << "CLIENT DELETED:" << clientID << "\n";}
+    ~client() {std::cout << "[!]CLIENT DELETED:" << clientID << "\n";}
 
+    // if client connected with clean session == 0, then, after disconnection,
+    // information about client is not getting deleted, instead we set active = false
     bool active;
     std::string clientID;
     struct session session;
 
     bool will;
-    bool willQOS;
-    bool willRetain;
-    std::string willTopic;
-    std::string willMsg;
+    mqtt_publish willMsg;
 
     std::string username;
     std::string password;
@@ -62,15 +61,29 @@ typedef struct client
 
 typedef struct topic
 {
-    topic(const std::string& _name): name(_name){}
+    topic(const std::string& _name): name(_name)
+    {
+        retainedMsg.header.byte = PUBLISH_BYTE;
+        retainedMsg.header.bits.retain = 1;
+        retainedMsg.topic = name;
+        retainedMsg.topiclen = uint16_t(name.size());
+
+        retain = false;
+    }
+    ~topic() {std::cout << "[!]TOPIC DELETED:" << name << "\n";}
+
+    void sub(std::shared_ptr<client>& client, uint8_t qos);
+    bool unsub(std::shared_ptr<client>& client, bool deleteRecordFromClient);
+
     std::string name;
-    std::string retainedMsg;
-    uint8_t retainedQOS;
-    std::vector<std::pair<client_t&, uint8_t>> subscribers;
 
-    ~topic() {std::cout << "Topic Deleted:" << name << "\n";}
+    bool retain;
+    mqtt_publish retainedMsg;
 
-    bool unsub(std::shared_ptr<client>& client);
+    // first - client ref, second - maximum qos level at which the server can send msgs to the client
+    using subscriber = std::pair<client_t&, uint8_t>;
+    // key - client ID
+    std::unordered_map<std::string, subscriber> subscribers;
 }topic_t;
 
 typedef struct core
@@ -80,7 +93,7 @@ typedef struct core
                                        std::shared_ptr<client_t>> clients;
     std::unordered_map<std::string, std::shared_ptr<client_t>> clientsIDs;
 
-    void delete_client(std::shared_ptr<client_t> &client);
+    void delete_client(std::shared_ptr<client_t>& client);
 
     std::vector<std::shared_ptr<topic_t>> get_matching_topics(const std::string &topicFilter)
     {

@@ -28,6 +28,7 @@ private:
     void handle_publish(std::shared_ptr<tps::net::connection<mqtt_header>>& netClient,
                         mqtt_publish& pkt);
     void handle_disconnect(std::shared_ptr<tps::net::connection<mqtt_header>>& netClient);
+    void handle_error(std::shared_ptr<tps::net::connection<mqtt_header>>& netClient);
 
     void handle_puback(std::shared_ptr<tps::net::connection<mqtt_header>>& netClient,
                         mqtt_puback& pkt);
@@ -39,6 +40,8 @@ private:
                         mqtt_pubcomp& pkt);
 
     void handle_pingreq(std::shared_ptr<tps::net::connection<mqtt_header>>& netClient);
+
+    void publish_msg(mqtt_publish& pkt);
 
     struct core m_core;
 };

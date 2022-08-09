@@ -6,10 +6,9 @@
 #include "NetCommon/net_client.h"
 #include "NetCommon/net_message.h"
 
-/*
 void test_simple_pack_unpack()
 {
-    tps::net::message msg;
+    tps::net::message<mqtt_header> msg;
 
     // PACK
     std::vector<uint8_t> u8s = {0, 100, 255};
@@ -95,7 +94,7 @@ void test_simple_pack_unpack()
 
 void test_mqtt_encode_decode_length()
 {
-    tps::net::message<T> msg;
+    tps::net::message<mqtt_header> msg;
 
     for (uint64_t len = 0; len < pow(2, 28)-1; len++)
     {
@@ -113,10 +112,10 @@ void test_pack_unpack()
 {
     {
         // PINGREQ
-        mqtt_header hdr(1, AT_MOST_ONCE, 0, PINGREQ);
+        mqtt_header hdr(1, AT_MOST_ONCE, 0, uint8_t(packet_type::PINGREQ));
         mqtt_packet pkt0(hdr.byte);
 
-        tps::net::message msg;
+        tps::net::message<mqtt_header> msg;
         pkt0.pack(msg);
 
         auto pkt1 = mqtt_packet::create(msg);
@@ -125,10 +124,10 @@ void test_pack_unpack()
 
     {
         // PINGRESP
-        mqtt_header hdr(0, AT_LEAST_ONCE, 1, PINGRESP);
+        mqtt_header hdr(0, AT_LEAST_ONCE, 1, uint8_t(packet_type::PINGRESP));
         mqtt_packet pkt0(hdr.byte);
 
-        tps::net::message msg;
+        tps::net::message<mqtt_header> msg;
         pkt0.pack(msg);
 
         auto pkt1 = mqtt_packet::create(msg);
@@ -137,57 +136,55 @@ void test_pack_unpack()
 
     {
         // PUBLISH
-        mqtt_header hdr(1, AT_LEAST_ONCE, 0, PUBLISH);
+        mqtt_header hdr(1, AT_LEAST_ONCE, 0, uint8_t(packet_type::PUBLISH));
         std:: string topic = "topic", payload = "message";
-        mqtt_publish pkt0(hdr.byte, 128, topic.length(), topic, payload.length(), payload);
+        mqtt_publish pkt0(hdr.byte, 128, topic.length(), topic, payload);
 
-        tps::net::message msg;
+        tps::net::message<mqtt_header> msg;
         pkt0.pack(msg);
 
         auto pkt1p = mqtt_packet::create(msg);
-        std::shared_ptr<mqtt_publish> pkt1 = std::dynamic_pointer_cast<mqtt_publish>(pkt1p);
-        assert(pkt0.header.byte == pkt1->header.byte);
-        assert(pkt0.pkt_id == pkt1->pkt_id);
-        assert(pkt0.topiclen == pkt1->topiclen);
-        assert(pkt0.topic == pkt1->topic);
-        assert(pkt0.payloadlen == pkt1->payloadlen);
-        assert(pkt0.payload == pkt1->payload);
+        mqtt_publish pkt1 = dynamic_cast<mqtt_publish&>(*pkt1p);
+        assert(pkt0.header.byte == pkt1.header.byte);
+        assert(pkt0.pkt_id == pkt1.pkt_id);
+        assert(pkt0.topiclen == pkt1.topiclen);
+        assert(pkt0.topic == pkt1.topic);
+        assert(pkt0.payload == pkt1.payload);
     }
 
     {
         // SUBACK
-        mqtt_header hdr(0, EXACTLY_ONCE, 1, SUBACK);
+        mqtt_header hdr(0, EXACTLY_ONCE, 1, uint8_t(packet_type::SUBACK));
         std::vector<uint8_t> rcs = {0, 255, 100, 1};
         mqtt_suback pkt0(hdr.byte, 65535, rcs);
 
-        tps::net::message msg;
+        tps::net::message<mqtt_header> msg;
         pkt0.pack(msg);
 
         auto pkt1p = mqtt_packet::create(msg);
-        std::shared_ptr<mqtt_suback> pkt1 = std::dynamic_pointer_cast<mqtt_suback>(pkt1p);
+        mqtt_suback pkt1 = dynamic_cast<mqtt_suback&>(*pkt1p);
 
-        assert(pkt0.header.byte == pkt1->header.byte);
-        assert(pkt0.pkt_id == pkt1->pkt_id);
+        assert(pkt0.header.byte == pkt1.header.byte);
+        assert(pkt0.pkt_id == pkt1.pkt_id);
         for (uint i = 0; i < pkt0.rcs.size(); i++)
-            assert(pkt0.rcs[i] == pkt1->rcs[i]);
+            assert(pkt0.rcs[i] == pkt1.rcs[i]);
     }
 
     {
         // PUBACK(PUBREC, PUBREL, PUBCOMP)
-        mqtt_header hdr(1, AT_MOST_ONCE, 0, PUBACK);
+        mqtt_header hdr(1, AT_MOST_ONCE, 0, uint8_t(packet_type::PUBACK));
         mqtt_ack pkt0(hdr.byte, 10);
 
-        tps::net::message msg;
+        tps::net::message<mqtt_header> msg;
         pkt0.pack(msg);
 
         auto pkt1p = mqtt_packet::create(msg);
-        std::shared_ptr<mqtt_ack> pkt1 = std::dynamic_pointer_cast<mqtt_ack>(pkt1p);
+        mqtt_ack pkt1 = dynamic_cast<mqtt_ack&>(*pkt1p);
 
-        assert(pkt0.header.byte == pkt1->header.byte);
-        assert(pkt0.pkt_id == pkt1->pkt_id);
+        assert(pkt0.header.byte == pkt1.header.byte);
+        assert(pkt0.pkt_id == pkt1.pkt_id);
     }
 }
-*/
 
 
 /*
@@ -634,9 +631,9 @@ void test_trie()
 void tests()
 {
     test_trie();
-//    test_simple_pack_unpack();
-//    test_mqtt_encode_decode_length();
-//    test_pack_unpack();
+    test_simple_pack_unpack();
+    test_mqtt_encode_decode_length();
+    test_pack_unpack();
 }
 
 #define CONNECT_BYTE 0x10
@@ -650,27 +647,64 @@ class MQTTClient: public tps::net::client_interface<T>
 public:
     void pack_connect(mqtt_connect& con, tps::net::message<mqtt_header>& msg)
     {
+        uint32_t len = 0;
+
         msg.hdr.byte.bits.type = con.header.bits.type;
-        msg.writeHdrSize += mqtt_encode_length(msg, 12+con.payload.client_id.size());
 
         std::string protocolName = "MQTT";
         uint16_t protocolLen = protocolName.size();
         msg << protocolLen;
         msg << protocolName;
+        len += sizeof(protocolLen) + protocolLen;
 
         uint8_t protocolLevel = 4;
         msg << protocolLevel;
+        len += sizeof(protocolLevel);
 
-        mqtt_connect::variable_header vhdr(0);
-        vhdr.bits.clean_session = con.vhdr.bits.clean_session;
+        mqtt_connect::variable_header vhdr;
+        vhdr.byte = con.vhdr.byte;
         msg << vhdr;
+        len += sizeof(vhdr);
 
         uint16_t keepalive = con.payload.keepalive;
         msg << keepalive;
+        len += sizeof(keepalive);
 
-        uint16_t clientIDLen = con.payload.client_id.size();
+        uint16_t clientIDLen = uint16_t(con.payload.client_id.size());
         msg << clientIDLen;
         msg << con.payload.client_id;
+        len += sizeof(clientIDLen) + clientIDLen;
+
+        if (vhdr.bits.will)
+        {
+            uint16_t willTopicLen = uint16_t(con.payload.will_topic.size());
+            msg << willTopicLen;
+            msg << con.payload.will_topic;
+            len += sizeof(willTopicLen) + willTopicLen;
+
+            uint16_t willMsgLen = uint16_t(con.payload.will_message.size());
+            msg << willMsgLen;
+            msg << con.payload.will_message;
+            len += sizeof(willMsgLen) + willMsgLen;
+        }
+
+        if (vhdr.bits.username)
+        {
+            uint16_t usernameLen = uint16_t(con.payload.username.size());
+            msg << usernameLen;
+            msg << con.payload.username;
+            len += sizeof(usernameLen) + usernameLen;
+        }
+
+        if (vhdr.bits.password)
+        {
+            uint16_t passwordLen = uint16_t(con.payload.password.size());
+            msg << passwordLen;
+            msg << con.payload.password;
+            len += sizeof(passwordLen) + passwordLen;
+        }
+
+        msg.writeHdrSize += mqtt_encode_length(msg, len);
     }
 
     void pack_subscribe(mqtt_subscribe& sub, tps::net::message<mqtt_header>& msg)
@@ -740,7 +774,6 @@ public:
         pub.topic = "/example";
         pub.topiclen = pub.topic.size();
         pub.payload = "message_example";
-        pub.payloadlen = pub.payload.size();
 
         tps::net::message<mqtt_header>pubmsg;
         pub.pack(pubmsg);
@@ -758,7 +791,7 @@ public:
         mqtt_subscribe::tuple t;
         t.topic = "/example";
         t.topiclen = t.topic.size();
-        t.qos = AT_MOST_ONCE;
+        t.qos = AT_LEAST_ONCE;
         subreq.tuples.emplace_back(t);
 
         tps::net::message<T> msg;
@@ -783,6 +816,19 @@ public:
         this->send(std::move(msg));
     }
 
+    void ack(mqtt_publish& pkt)
+    {
+        mqtt_ack ack;
+        tps::net::message<T> msg;
+
+        if (pkt.header.bits.qos == AT_LEAST_ONCE)
+            ack.header = PUBACK_BYTE;
+        ack.pkt_id = pkt.pkt_id;
+
+        ack.pack(msg);
+        this->send(std::move(msg));
+    }
+
     void pingreq()
     {
         mqtt_pingreq pingreq(PINGREQ_BYTE);
@@ -793,7 +839,7 @@ public:
     }
 };
 
-//#define CLIENT
+#define CLIENT
 
 int main()
 {
@@ -821,8 +867,13 @@ int main()
 
     mqtt_connect con(CONNECT_BYTE);
     con.vhdr.bits.clean_session = 1;
-    con.payload.client_id = "foo2";
+    con.vhdr.bits.will = 1;
+    con.vhdr.bits.will_qos = AT_LEAST_ONCE;
+    con.vhdr.bits.will_retain = 1;
+    con.payload.client_id = "foo4";
     con.payload.keepalive = 0xffff;
+    con.payload.will_topic = "/example";
+    con.payload.will_message = "[X]WILL: " + con.payload.client_id + " is dead";
 
     tps::net::message<mqtt_header>conmsg;
     client.pack_connect(con, conmsg);
@@ -850,6 +901,7 @@ int main()
 //                std::cout << "[" << std::this_thread::get_id() << "]MAIN POP BEFORE\n";
                 tps::net::message<mqtt_header> msg = client.incoming().pop_front().msg;
 //                std::cout << "[" << std::this_thread::get_id() << "]MAIN POP AFTER\n";
+
                 switch (packet_type(msg.hdr.byte.bits.type))
                 {
                     case packet_type::CONNACK:
@@ -869,6 +921,7 @@ int main()
                     case packet_type::UNSUBACK:
                     {
                         mqtt_unsuback resp;
+                        resp.header = msg.hdr.byte;
                         resp.unpack(msg);
                         std::cout << "\n\t{UNSUBACK}\n" << resp;
                         break;
@@ -876,20 +929,26 @@ int main()
                     case packet_type::PUBLISH:
                     {
                         mqtt_publish resp;
+                        resp.header = msg.hdr.byte;
                         resp.unpack(msg);
+                        client.ack(resp);
                         std::cout << "\n\t{PUBLISH}\n" << resp;
                         break;
                     }
                     case packet_type::PUBACK:
                     {
                         mqtt_puback resp;
+                        resp.header = msg.hdr.byte;
                         resp.unpack(msg);
+
                         std::cout << "\n\t{PUBACK}\n" << resp;
                         break;
                     }
                     case packet_type::PINGRESP:
                     {
-                        std::cout << "\n\t{PINGRESP}\n";
+                        mqtt_packet resp;
+                        resp.header = msg.hdr.byte;
+                        std::cout << "\n\t{PINGRESP}\n" << resp;
                         break;
                     }
                     default:

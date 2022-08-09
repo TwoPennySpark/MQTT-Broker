@@ -45,7 +45,8 @@ enum class packet_type: uint8_t
     UNSUBACK    = 11,
     PINGREQ     = 12,
     PINGRESP    = 13,
-    DISCONNECT  = 14
+    DISCONNECT  = 14,
+    ERROR       = 15
 };
 
 enum qos_level { AT_MOST_ONCE, AT_LEAST_ONCE, EXACTLY_ONCE };
@@ -85,9 +86,9 @@ struct mqtt_packet
     virtual ~mqtt_packet() = default;
 
     template<typename T, typename... Args>
-    static std::unique_ptr<T> create(uint8_t hdr, Args... args)
+    static std::unique_ptr<T> create(uint8_t hdr, Args&&... args)
     {
-        return std::unique_ptr<T>(new T(hdr, args...));
+        return std::unique_ptr<T>(new T(hdr, std::forward<Args>(args)...));
     }
 
     static std::unique_ptr<mqtt_packet> create(tps::net::message<mqtt_header>& msg);
@@ -220,13 +221,12 @@ struct mqtt_publish: public mqtt_packet
     mqtt_publish() = default;
     mqtt_publish(uint8_t _hdr): mqtt_packet (_hdr) {}
     mqtt_publish(uint8_t _hdr, uint16_t _pkt_id, uint16_t _topiclen, std::string& _topic,
-                uint16_t _payloadlen, std::string& _payload):
+                std::string& _payload):
                 mqtt_packet(_hdr), pkt_id(_pkt_id), topiclen(_topiclen), topic(_topic),
-                payloadlen(_payloadlen), payload(_payload){}
+                payload(_payload){}
     uint16_t pkt_id;
     uint16_t topiclen;
     std::string topic;
-    uint16_t payloadlen;
     std::string payload;
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_publish& pkt);

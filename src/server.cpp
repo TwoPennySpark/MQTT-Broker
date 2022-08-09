@@ -8,7 +8,7 @@ bool server::on_client_connect(std::shared_ptr<tps::net::connection<mqtt_header>
 void server::on_client_disconnect(std::shared_ptr<tps::net::connection<mqtt_header>> client)
 {
     tps::net::message<mqtt_header> msg;
-    msg.hdr.byte.bits.type = uint8_t(packet_type::DISCONNECT);
+    msg.hdr.byte.bits.type = uint8_t(packet_type::ERROR);
 
     m_qMessagesIn.push_front(tps::net::owned_message<mqtt_header>({std::move(client), std::move(msg)}));
 }
@@ -71,11 +71,14 @@ void server::on_message(std::shared_ptr<tps::net::connection<mqtt_header>>& netC
             std::cout << "\n\t{DISCONNECT}\n" << dynamic_cast<mqtt_disconnect&>(*newPkt);
             handle_disconnect(netClient);
             break;
+        case packet_type::ERROR:
+            std::cout << "\n\t{ERROR}\n" << dynamic_cast<mqtt_disconnect&>(*newPkt);
+            handle_error(netClient);
+            break;
         case packet_type::CONNACK:
         case packet_type::SUBACK:
         case packet_type::PINGRESP:
         default:
-            netClient->disconnect();
             break;
     }
 }
@@ -92,18 +95,24 @@ void server::handle_connect(std::shared_ptr<tps::net::connection<mqtt_header>>& 
     auto it = m_core.clientsIDs.find(pkt.payload.client_id);
     if (it != m_core.clientsIDs.end())
     {
-        auto existingClient = it->second;
+        auto& existingClient = it->second;
 
         // deletion of the client
         // second CONNECT packet came from the same client(address) - violation [MQTT-3.1.0-2]
         if (existingClient->netClient == netClient /*&& existingClient->active*/)
         {
+            if (existingClient->will)
+            {
+                publish_msg(existingClient->willMsg);
+                existingClient->will = false;
+            }
+            existingClient->netClient->disconnect();
             m_core.delete_client(existingClient);
-            return;
+            return; // no CONNACK reply [MQTT-3.1.4-1]
         }
 
         // replacement of the client
-        // second CONNECT packet came from other address - disconnect existing client[MQTT-3.1.4-2]
+        // second CONNECT packet came from other address - disconnect existing client [MQTT-3.1.4-2]
         if (existingClient->active)
         {
             existingClient->netClient->disconnect();
@@ -130,8 +139,8 @@ void server::handle_connect(std::shared_ptr<tps::net::connection<mqtt_header>>& 
     }
     else
     {
+        // create new client
         auto newClient = std::make_shared<client_t>(netClient);
-
         newClient->clientID = pkt.payload.client_id;
 
         m_core.clientsIDs.emplace(std::pair<std::string, std::shared_ptr<client_t>>
@@ -145,15 +154,17 @@ void server::handle_connect(std::shared_ptr<tps::net::connection<mqtt_header>>& 
 
     client->active = true;
 
-    // copy data from CONNECT packet
+    // move data from CONNECT packet
     client->session.cleanSession = pkt.vhdr.bits.clean_session;
     if (pkt.vhdr.bits.will)
     {
         client->will = true;
-        client->willQOS = pkt.vhdr.bits.will_qos;
-        client->willRetain = pkt.vhdr.bits.will_retain;
-        client->willTopic = std::move(pkt.payload.will_topic);
-        client->willMsg = std::move(pkt.payload.will_message);
+        client->willMsg.header.byte = PUBLISH_BYTE;
+        client->willMsg.header.bits.qos = pkt.vhdr.bits.will_qos;
+        client->willMsg.header.bits.retain = pkt.vhdr.bits.will_retain;
+        client->willMsg.topic = std::move(pkt.payload.will_topic);
+        client->willMsg.topiclen = uint16_t(client->willMsg.topic.size());
+        client->willMsg.payload = std::move(pkt.payload.will_message);
     }
     if (pkt.vhdr.bits.username)
         client->username = std::move(pkt.payload.username);
@@ -167,28 +178,48 @@ void server::handle_connect(std::shared_ptr<tps::net::connection<mqtt_header>>& 
     connack.rc = 0;
     connack.pack(reply);
     this->message_client(netClient, std::move(reply));
+
+//    if (connack.sp.byte)
+//    {
+//        for (auto& msg: client->session.savedMsgs)
+//        {
+//            if (msg.hdr.byte.bits.qos == AT_LEAST_ONCE)
+//                client->session.unregPuback.insert(msg.pkt_id);
+//            else
+//                client->session.unregPubrec.insert(msg.pkt_id);
+
+//            this->message_client(netClient, msg);
+//        }
+//    }
 }
 
 void server::handle_subscribe(std::shared_ptr<tps::net::connection<mqtt_header>>& netClient,
                     mqtt_subscribe& pkt)
 {
     auto it = m_core.clients.find(netClient);
-    auto client = it->second;
+    auto& client = it->second;
     mqtt_suback suback(SUBACK_BYTE);
+    std::vector<tps::net::message<mqtt_header>> retainedMsgs;
+
+    auto save_retained_msg = [&retainedMsgs](std::shared_ptr<topic_t>& topic)
+    {
+        tps::net::message<mqtt_header> pubmsg;
+        topic->retainedMsg.pack(pubmsg);
+        retainedMsgs.emplace_back(std::move(pubmsg));
+    };
 
     for (auto& tuple: pkt.tuples)
     {
+        // if topic filter cotains wildcards
         if (tuple.topic[0] == '+' || tuple.topic[tuple.topic.length()-1] == '#'
                 || tuple.topic.find("/+") != std::string::npos)
         {
             auto matches = m_core.get_matching_topics(tuple.topic);
-
             for (auto& topic: matches)
             {
-                std::pair<client_t&, uint8_t> temp(*client, tuple.qos);
-                topic->subscribers.emplace_back(std::move(temp));
-//                topic->subscribers.emplace_back(std::make_pair<std::shared_ptr<client_t>, uint8_t>
-//                                          (std::make_shared<client_t>(client), uint8_t(tuple.qos)));
+                topic->sub(client, tuple.qos);
+                if (topic->retain)
+                    save_retained_msg(topic);
             }
         }
         else
@@ -203,9 +234,9 @@ void server::handle_subscribe(std::shared_ptr<tps::net::connection<mqtt_header>>
                 m_core.topics.insert(tuple.topic, newTopic);
                 topic = newTopic;
             }
-
-            std::pair<client_t&, uint8_t> temp(*client, tuple.qos);
-            topic->subscribers.emplace_back(std::move(temp));
+            topic->sub(client, tuple.qos);
+            if (topic->retain)
+                save_retained_msg(topic);
         }
         suback.rcs.push_back(tuple.qos);
     }
@@ -215,13 +246,17 @@ void server::handle_subscribe(std::shared_ptr<tps::net::connection<mqtt_header>>
     suback.pkt_id = pkt.pkt_id;
     suback.pack(reply);
     this->message_client(netClient, std::move(reply));
+
+    // send retained msgs
+    for (auto& msg: retainedMsgs)
+        this->message_client(netClient, std::move(msg));
 }
 
 void server::handle_unsubscribe(std::shared_ptr<tps::net::connection<mqtt_header>>& netClient,
                     mqtt_unsubscribe& pkt)
 {
     auto it = m_core.clients.find(netClient);
-    auto client = it->second;
+    auto& client = it->second;
 
     for (auto& tuple: pkt.tuples)
     {
@@ -230,7 +265,7 @@ void server::handle_unsubscribe(std::shared_ptr<tps::net::connection<mqtt_header
         {
             auto matches = m_core.get_matching_topics(tuple.topic);
             for (auto& topic: matches)
-                if (topic->unsub(client) && !topic->subscribers.size())
+                if (topic->unsub(client, true) && !topic->subscribers.size())
                     m_core.topics.erase(topic->name);
         }
         else
@@ -239,7 +274,7 @@ void server::handle_unsubscribe(std::shared_ptr<tps::net::connection<mqtt_header
             if (topicNode && topicNode->data)
             {
                 auto& topic = topicNode->data;
-                if (topic->unsub(client) && !topic->subscribers.size())
+                if (topic->unsub(client, true) && !topic->subscribers.size())
                     m_core.topics.erase(topicNode->data->name);
             }
         }
@@ -253,69 +288,97 @@ void server::handle_unsubscribe(std::shared_ptr<tps::net::connection<mqtt_header
     this->message_client(netClient, std::move(reply));
 }
 
+void server::publish_msg(mqtt_publish& pkt)
+{
+    auto node = m_core.topics.find(pkt.topic);
+    if (node && node->data)
+    {
+        auto& topic = node->data;
+
+        // if retain flag set & qos == 0
+        if (pkt.header.bits.retain && pkt.header.bits.qos == AT_MOST_ONCE)
+        {
+            // save new retained msg
+            if (pkt.payload.size())
+            {
+                topic->retainedMsg.payload = pkt.payload;
+                topic->retain = true;
+            }
+            else
+                // if payload.size() == 0 delete existing retained msg
+                topic->retain = false;
+        }
+
+        // send published msg to subscribers with new header (and pkt ID if QoS > 0)
+        uint8_t originalQoS = pkt.header.bits.qos;
+        tps::net::message<mqtt_header> pubmsgQoS0;
+        tps::net::message<mqtt_header> pubmsgQoS12;
+        pkt.header.bits.retain = 0;
+        pkt.header.bits.dup = 0;
+
+        static uint16_t pktID = 0; //
+        pkt.pkt_id = pktID++;
+
+        // create both versions of the message if qos > 0
+        // so that there is no need to call mqtt_publish::pack
+        // inside next loop for every sub
+        pkt.header.bits.qos = AT_MOST_ONCE;
+        pkt.pack(pubmsgQoS0);
+        if (originalQoS > AT_MOST_ONCE)
+        {
+            pkt.header.bits.qos = AT_LEAST_ONCE;
+            pkt.pack(pubmsgQoS12);
+        }
+        pkt.header.bits.qos = originalQoS;
+
+        for (auto& sub: topic->subscribers)
+        {
+            // determine QoS level based on published msg QoS and client
+            // max QoS level specified in SUBSCRIBE packet
+            auto qos = std::min(sub.second.second, pkt.header.bits.qos);
+
+            // avoiding one extra copy inside message_client
+            // publish one of the early created versions depending on QoS
+            auto temp = (qos == AT_MOST_ONCE) ? pubmsgQoS0 : pubmsgQoS12;
+            temp.hdr.byte.bits.qos = qos;
+
+            auto& subClient = sub.second.first;
+            if (subClient.active)
+            {
+                if (temp.hdr.byte.bits.qos == AT_LEAST_ONCE)
+                    subClient.session.unregPuback.insert(pkt.pkt_id);
+                else if (temp.hdr.byte.bits.qos == EXACTLY_ONCE)
+                    subClient.session.unregPubrec.emplace(
+                                std::make_pair<uint16_t, uint8_t>(uint16_t(pkt.pkt_id), 0));
+                this->message_client(subClient.netClient, std::move(temp));
+            }
+            else
+            {
+                // save msgs until session is restored
+                if (temp.hdr.byte.bits.qos > AT_MOST_ONCE)
+                    subClient.session.savedMsgs.emplace_back(std::move(temp));
+            }
+        }
+    }
+}
+
 void server::handle_publish(std::shared_ptr<tps::net::connection<mqtt_header>>& netClient,
                     mqtt_publish& pkt)
 {
-    std::cout << "[[[[[[[[[[[[[[[[[" << netClient.use_count() << "]]]]]]]]]]]]]\n";
+//    std::cout << "[[[[[[[[[[[[[[[[[" << netClient.use_count() << "]]]]]]]]]]]]]\n";
     mqtt_ack ack;
     auto it = m_core.clients.find(netClient);
     // in case you receive a msg from a recently disconnected client
     if (!(it != m_core.clients.end() && it->second->active))
         return;
-    auto client = it->second;
+    auto& client = it->second;
 
     // if it's not an attempt to resend qos2 msg that
-    // has already been recieved(sender didn't get pubrec reply for some reason)
+    // has already been recieved (publisher didn't get pubrec reply for some reason)
     auto itpubrel = client->session.unregPubrel.find(pkt.pkt_id);
     if (!(pkt.header.bits.qos == EXACTLY_ONCE && itpubrel != client->session.unregPubrel.end()))
     {
-        auto node = m_core.topics.find(pkt.topic);
-        if (node && node->data)
-        {
-            auto& topic = node->data;
-
-            // if retain flag set
-            if (pkt.header.bits.retain)
-            {
-                // save new retained msg
-                if (pkt.payloadlen)
-                {
-                    topic->retainedMsg = pkt.payload;
-                    topic->retainedQOS = pkt.header.bits.qos;
-                }
-                else
-                    // if payload == 0 delete existing retained msg
-                    topic->retainedMsg.clear();
-            }
-
-            // send published msg to subscribers (with new header & pkt ID)
-            mqtt_publish pub = std::move(pkt);
-            pub.header.byte = PUBLISH_BYTE;
-
-            static uint16_t pktID = 0; //
-            pub.pkt_id = pktID++;
-
-            tps::net::message<mqtt_header> pubmsg;
-            pub.pack(pubmsg);
-            for (auto& sub: topic->subscribers)
-            {
-                auto temp = pubmsg; // avoiding one extra copy inside message_client
-                temp.hdr.byte.bits.qos = std::min(sub.second, pkt.header.bits.qos);
-                if (sub.first.active)
-                {
-                    if (temp.hdr.byte.bits.qos == AT_LEAST_ONCE)
-                        sub.first.session.unregPuback.insert(pub.pkt_id);
-                    else if (temp.hdr.byte.bits.qos == EXACTLY_ONCE)
-                        sub.first.session.unregPubrec.emplace(std::make_pair<uint16_t, uint8_t>(uint16_t(pub.pkt_id), 0));
-                    this->message_client(sub.first.netClient, std::move(temp));
-                }
-                else
-                {
-//                    if (temp.hdr.byte.bits.qos > AT_MOST_ONCE)
-//                        sub.first.session
-                }
-            }
-        }
+        publish_msg(pkt);
 
         // send reply to publisher if QOS == 1 or 2
         // QOS == 1 send PUBACK response
@@ -326,7 +389,8 @@ void server::handle_publish(std::shared_ptr<tps::net::connection<mqtt_header>>& 
         else if (pkt.header.bits.qos == EXACTLY_ONCE)
         {
             ack.header.byte = PUBREC_BYTE;
-            client->session.unregPubrel.emplace(std::make_pair<uint16_t, uint8_t>(uint16_t(pkt.pkt_id), 0));
+            client->session.unregPubrel.emplace(
+                        std::make_pair<uint16_t, uint8_t>(uint16_t(pkt.pkt_id), 0));
         }
         else
             return;
@@ -349,9 +413,25 @@ void server::handle_disconnect(std::shared_ptr<tps::net::connection<mqtt_header>
     auto it = m_core.clients.find(netClient);
     if (it != m_core.clients.end())
     {
+        netClient->disconnect();
         // discard will msg [MQTT-3.14.4-3]
         it->second->will = false;
         m_core.delete_client(it->second);
+    }
+}
+
+void server::handle_error(std::shared_ptr<tps::net::connection<mqtt_header>>& netClient)
+{
+    auto it = m_core.clients.find(netClient);
+    if (it != m_core.clients.end())
+    {
+        auto& client = it->second;
+        if (client->will)
+        {
+            publish_msg(client->willMsg);
+            client->will = false;
+        }
+        m_core.delete_client(client);
     }
 }
 
@@ -401,6 +481,7 @@ void server::handle_pubrel(std::shared_ptr<tps::net::connection<mqtt_header>>& n
 
             tps::net::message<mqtt_header> msg;
             mqtt_pubcomp pubcomp(PUBCOMP_BYTE);
+            pubcomp.header.bits.dup = itpubrel->second++;
             pubcomp.pkt_id = pkt.pkt_id;
             pubcomp.pack(msg);
             this->message_client(client->netClient, std::move(msg));

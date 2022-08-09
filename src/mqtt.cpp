@@ -1,11 +1,11 @@
 #include "mqtt.h"
 #include "NetCommon/net_message.h"
 
-const uint8_t MAX_REMAINING_LENGTH_SIZE = 4;
 
 uint8_t mqtt_encode_length(tps::net::message<mqtt_header>& msg, size_t len)
 {
     uint8_t bytes = 0;
+    const uint8_t MAX_REMAINING_LENGTH_SIZE = 4;
     uint8_t* p = reinterpret_cast<uint8_t*>(&msg.hdr.size);
     do
     {
@@ -25,11 +25,13 @@ uint32_t mqtt_decode_length(tps::net::message<mqtt_header>& msg)
 {
     uint32_t len = 0;
     uint8_t bytes = 0;
+    const uint8_t MAX_REMAINING_LENGTH_SIZE = 4;
     std::vector<uint8_t> lenV(MAX_REMAINING_LENGTH_SIZE);
+    uint8_t* p = reinterpret_cast<uint8_t*>(&msg.hdr.size);
 
     do
     {
-        msg >> lenV[bytes];
+        lenV[bytes] = p[bytes];
         len |= ((lenV[bytes] & 127u) << bytes*7);
     } while (((lenV[bytes++] & 128) != 0) && bytes < MAX_REMAINING_LENGTH_SIZE);
 
@@ -56,13 +58,13 @@ std::ostream& operator<<(std::ostream &os, const mqtt_connect &pkt)
 {
     os << pkt.header;
     os << "\tCLIENT ID: \"" << pkt.payload.client_id << "\"" << std::endl;
-    printf("\tCLEAN SESSION: %d\n", pkt.vhdr.bits.clean_session);
+    os << "\tCLEAN SESSION: " << std::to_string(pkt.vhdr.bits.clean_session) << std::endl;
     os << "\tKEEPALIVE: " << pkt.payload.keepalive << std::endl;
     if (pkt.vhdr.bits.will)
     {
         os << "\tWILL TOPIC:" << "\"" << pkt.payload.will_topic << "\"" << std::endl;
         os << "\tWILL MSG:" << "\"" << pkt.payload.will_message << "\"" << std::endl;
-        os << "\tWILL RETAIN:" << pkt.vhdr.bits.will_retain << std::endl;
+        os << "\tWILL RETAIN:" << std::to_string(pkt.vhdr.bits.will_retain) << std::endl;
     }
     if (pkt.vhdr.bits.username)
         os << "\tUSERNAME:" << "\"" << pkt.payload.username << "\"" << std::endl;
@@ -86,7 +88,7 @@ std::ostream& operator<<(std::ostream &os, const mqtt_publish &pkt)
     os << pkt.header;
     os << "\tPKT ID: " << pkt.pkt_id << std::endl;
     os << "\tTOPIC[" << pkt.topiclen << "]: " << "\"" << pkt.topic << "\"" << std::endl;
-    os << "\tPAYLOAD[" << pkt.payloadlen << "]: " << "\"" << pkt.payload << "\"" << std::endl;
+    os << "\tPAYLOAD[" << pkt.payload.size() << "]: " << "\"" << pkt.payload << "\"" << std::endl;
     os << "\t================END BODY================\n\n";
 
     return os;
@@ -98,7 +100,7 @@ std::ostream& operator<<(std::ostream &os, const mqtt_subscribe &pkt)
     os << "\tPKT ID: " << pkt.pkt_id << std::endl;
     for (auto& t: pkt.tuples)
         os << "\tTOPIC[" << t.topiclen << "]: "
-           << "\"" << t.topic << "\": " << t.qos << std::endl;
+           << "\"" << t.topic << "\": " << std::to_string(t.qos) << std::endl;
     os << "\t================END BODY================\n\n";
 
     return os;
@@ -172,10 +174,9 @@ std::unique_ptr<mqtt_packet> mqtt_packet::create(tps::net::message<mqtt_header>&
         case packet_type::PINGREQ:
         case packet_type::PINGRESP:
         case packet_type::DISCONNECT:
+        default:
             ret = create<mqtt_packet>(byte);
             break;
-        default:
-            return nullptr;
     }
     ret->unpack(msg);
 
@@ -304,7 +305,7 @@ void mqtt_publish::unpack(tps::net::message<mqtt_header>& msg)
 
     // the len of msg contained in publish packet = packet len - (len of topic size + topic itself) +
     // + len of pkt id when qos level > 0
-    payloadlen = msg.hdr.size - (sizeof(topiclen) + topiclen);
+    uint32_t payloadlen = msg.hdr.size - (sizeof(topiclen) + topiclen);
     // pkt id is a variable field
     if (header.bits.qos > AT_MOST_ONCE)
     {
@@ -340,7 +341,7 @@ void mqtt_publish::pack(tps::net::message<mqtt_header>& msg)
 {
     msg.hdr.byte = header.byte;
     uint32_t remainingLen = sizeof(topiclen) +
-                            topiclen + payloadlen;
+                            topiclen + payload.size();
     if (header.bits.qos > AT_MOST_ONCE)
         remainingLen += sizeof(pkt_id);
     msg.writeHdrSize += mqtt_encode_length(msg, remainingLen);

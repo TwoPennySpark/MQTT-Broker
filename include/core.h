@@ -12,14 +12,7 @@
 
 typedef struct topic topic_t;
 
-namespace tps
-{
-    namespace net
-    {
-        template <typename T>
-        class connection;
-    }
-}
+namespace tps::net {template <typename T> class connection;}
 
 struct session
 {
@@ -36,6 +29,13 @@ struct session
     std::set<uint16_t> unregPubcomp;
 
     std::vector<tps::net::message<mqtt_header>> savedMsgs;
+
+    void clear()
+    {
+        subscriptions.clear(); savedMsgs.clear();
+        unregPuback.clear(); unregPubrec.clear();
+        unregPubrel.clear(); unregPubcomp.clear();
+    }
 };
 
 typedef struct client
@@ -44,16 +44,15 @@ typedef struct client
     ~client() {std::cout << "[!]CLIENT DELETED:" << clientID << "\n";}
 
     // if client connected with clean session == 0, then, after disconnection,
-    // information about client is not getting deleted, instead we set active = false
+    // information about client(session) is not getting deleted, instead we set active = false
     bool active;
     std::string clientID;
     struct session session;
 
-    bool will;
-    mqtt_publish willMsg;
+    std::optional<mqtt_publish> will;
 
-    std::string username;
-    std::string password;
+    std::optional<std::string> username;
+    std::optional<std::string> password;
 
     uint16_t keepalive;
     std::shared_ptr<tps::net::connection<mqtt_header>> netClient;
@@ -61,15 +60,7 @@ typedef struct client
 
 typedef struct topic
 {
-    topic(const std::string& _name): name(_name)
-    {
-        retainedMsg.header.byte = PUBLISH_BYTE;
-        retainedMsg.header.bits.retain = 1;
-        retainedMsg.topic = name;
-        retainedMsg.topiclen = uint16_t(name.size());
-
-        retain = false;
-    }
+    topic(const std::string& _name): name(_name) {}
     ~topic() {std::cout << "[!]TOPIC DELETED:" << name << "\n";}
 
     void sub(std::shared_ptr<client>& client, uint8_t qos);
@@ -77,8 +68,7 @@ typedef struct topic
 
     std::string name;
 
-    bool retain;
-    mqtt_publish retainedMsg;
+    std::optional<mqtt_publish> retain;
 
     // first - client ref, second - maximum qos level at which the server can send msgs to the client
     using subscriber = std::pair<client_t&, uint8_t>;

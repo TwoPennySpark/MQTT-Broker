@@ -112,7 +112,9 @@ void test_pack_unpack()
 {
     {
         // PINGREQ
-        mqtt_header hdr(1, AT_MOST_ONCE, 0, uint8_t(packet_type::PINGREQ));
+        mqtt_header hdr;
+        hdr.bits.retain = 1; hdr.bits.qos = AT_MOST_ONCE; hdr.bits.dup = 0;
+        hdr.bits.type = uint8_t(packet_type::PINGREQ);
         mqtt_packet pkt0(hdr.byte);
 
         tps::net::message<mqtt_header> msg;
@@ -124,7 +126,9 @@ void test_pack_unpack()
 
     {
         // PINGRESP
-        mqtt_header hdr(0, AT_LEAST_ONCE, 1, uint8_t(packet_type::PINGRESP));
+        mqtt_header hdr;
+        hdr.bits.retain = 0; hdr.bits.qos = AT_LEAST_ONCE; hdr.bits.dup = 1;
+        hdr.bits.type = uint8_t(packet_type::PINGRESP);
         mqtt_packet pkt0(hdr.byte);
 
         tps::net::message<mqtt_header> msg;
@@ -136,9 +140,12 @@ void test_pack_unpack()
 
     {
         // PUBLISH
-        mqtt_header hdr(1, AT_LEAST_ONCE, 0, uint8_t(packet_type::PUBLISH));
+        mqtt_header hdr;
+        hdr.bits.retain = 1; hdr.bits.qos = AT_LEAST_ONCE; hdr.bits.dup = 0;
+        hdr.bits.type = uint8_t(packet_type::PUBLISH);
         std:: string topic = "topic", payload = "message";
-        mqtt_publish pkt0(hdr.byte, 128, topic.length(), topic, payload);
+        mqtt_publish pkt0(hdr.byte);
+        pkt0.pkt_id = 128; pkt0.topic = topic; pkt0.topiclen = topic.size(); pkt0.payload = payload;
 
         tps::net::message<mqtt_header> msg;
         pkt0.pack(msg);
@@ -154,9 +161,12 @@ void test_pack_unpack()
 
     {
         // SUBACK
-        mqtt_header hdr(0, EXACTLY_ONCE, 1, uint8_t(packet_type::SUBACK));
+        mqtt_header hdr;
+        hdr.bits.retain = 0; hdr.bits.qos = EXACTLY_ONCE; hdr.bits.dup = 1;
+        hdr.bits.type = uint8_t(packet_type::SUBACK);
         std::vector<uint8_t> rcs = {0, 255, 100, 1};
-        mqtt_suback pkt0(hdr.byte, 65535, rcs);
+        mqtt_suback pkt0(hdr.byte);
+        pkt0.pkt_id = 65535; pkt0.rcs = rcs;
 
         tps::net::message<mqtt_header> msg;
         pkt0.pack(msg);
@@ -172,8 +182,11 @@ void test_pack_unpack()
 
     {
         // PUBACK(PUBREC, PUBREL, PUBCOMP)
-        mqtt_header hdr(1, AT_MOST_ONCE, 0, uint8_t(packet_type::PUBACK));
-        mqtt_ack pkt0(hdr.byte, 10);
+        mqtt_header hdr;
+        hdr.bits.retain = 1; hdr.bits.qos = AT_MOST_ONCE; hdr.bits.dup = 0;
+        hdr.bits.type = uint8_t(packet_type::PUBACK);
+        mqtt_ack pkt0(hdr.byte);
+        pkt0.pkt_id = 10;
 
         tps::net::message<mqtt_header> msg;
         pkt0.pack(msg);
@@ -185,7 +198,6 @@ void test_pack_unpack()
         assert(pkt0.pkt_id == pkt1.pkt_id);
     }
 }
-
 
 /*
 ============================================
@@ -224,7 +236,6 @@ void test_pack_unpack()
 ·         “/finance” matches “+/+” and “/+”, but not “+”
 ============================================
 */
-
 
 std::vector<std::shared_ptr<topic_t>> get_matching_topics(trie<topic_t>& topics, const std::string &topicFilter)
 {
@@ -335,8 +346,9 @@ std::vector<std::shared_ptr<topic_t>> get_matching_topics(trie<topic_t>& topics,
     return matches;
 }
 
-void test_trie1(trie<topic_t>& topics)
+void test_trie1()
 {
+    trie<topic_t> topics;
     auto add = [&topics](const std::string& topic)
         {topics.insert(topic, std::make_shared<topic_t>(topic));};
     std::vector<std::string> valid = {"a", "aaa/", "aaa/b", "aaa/bbb", "aaa/bbb/c",
@@ -354,8 +366,9 @@ void test_trie1(trie<topic_t>& topics)
     }
 }
 
-void test_trie2(trie<topic_t>& topics)
+void test_trie2()
 {
+    trie<topic_t> topics;
     auto add = [&topics](const std::string& topic)
         {topics.insert(topic, std::make_shared<topic_t>(topic));};
     std::string topicFilter = "/+/b";
@@ -376,8 +389,9 @@ void test_trie2(trie<topic_t>& topics)
     }
 }
 
-void test_trie3(trie<topic_t>& topics)
+void test_trie3()
 {
+    trie<topic_t> topics;
     auto add = [&topics](const std::string& topic)
         {topics.insert(topic, std::make_shared<topic_t>(topic));};
     std::string topicFilter = "a/+/b/+/c";
@@ -399,8 +413,9 @@ void test_trie3(trie<topic_t>& topics)
     }
 }
 
-void test_trie4(trie<topic_t>& topics)
+void test_trie4()
 {
+    trie<topic_t> topics;
     auto add = [&topics](const std::string& topic)
         {topics.insert(topic, std::make_shared<topic_t>(topic));};
     std::string topicFilter = "/+/b/+/c";
@@ -422,8 +437,9 @@ void test_trie4(trie<topic_t>& topics)
     }
 }
 
-void test_trie5(trie<topic_t>& topics)
+void test_trie5()
 {
+    trie<topic_t> topics;
     auto add = [&topics](const std::string& topic)
         {topics.insert(topic, std::make_shared<topic_t>(topic));};
     std::string topicFilter = "/+/+/c";
@@ -445,8 +461,9 @@ void test_trie5(trie<topic_t>& topics)
     }
 }
 
-void test_trie6(trie<topic_t>& topics)
+void test_trie6()
 {
+    trie<topic_t> topics;
     auto add = [&topics](const std::string& topic)
         {topics.insert(topic, std::make_shared<topic_t>(topic));};
     std::string topicFilter = "+/a/bb/ccc";
@@ -469,8 +486,9 @@ void test_trie6(trie<topic_t>& topics)
     }
 }
 
-void test_trie7(trie<topic_t>& topics)
+void test_trie7()
 {
+    trie<topic_t> topics;
     auto add = [&topics](const std::string& topic)
         {topics.insert(topic, std::make_shared<topic_t>(topic));};
     std::string topicFilter = "+/+/a/+/bb/";
@@ -493,8 +511,9 @@ void test_trie7(trie<topic_t>& topics)
     }
 }
 
-void test_trie8(trie<topic_t>& topics)
+void test_trie8()
 {
+    trie<topic_t> topics;
     auto add = [&topics](const std::string& topic)
         {topics.insert(topic, std::make_shared<topic_t>(topic));};
     std::string topicFilter = "a/b/#";
@@ -517,8 +536,9 @@ void test_trie8(trie<topic_t>& topics)
     }
 }
 
-void test_trie9(trie<topic_t>& topics)
+void test_trie9()
 {
+    trie<topic_t> topics;
     auto add = [&topics](const std::string& topic)
         {topics.insert(topic, std::make_shared<topic_t>(topic));};
     std::string topicFilter = "+/#";
@@ -540,8 +560,9 @@ void test_trie9(trie<topic_t>& topics)
     }
 }
 
-void test_trie10(trie<topic_t>& topics)
+void test_trie10()
 {
+    trie<topic_t> topics;
     auto add = [&topics](const std::string& topic)
         {topics.insert(topic, std::make_shared<topic_t>(topic));};
     std::string topicFilter = "+/a/+/b/+/#";
@@ -563,8 +584,9 @@ void test_trie10(trie<topic_t>& topics)
     }
 }
 
-void test_trie11(trie<topic_t>& topics)
+void test_trie11()
 {
+    trie<topic_t> topics;
     auto add = [&topics](const std::string& topic)
         {topics.insert(topic, std::make_shared<topic_t>(topic));};
     std::string topicFilter = "/a/+";
@@ -586,8 +608,9 @@ void test_trie11(trie<topic_t>& topics)
     }
 }
 
-void test_trie12(trie<topic_t>& topics)
+void test_trie12()
 {
+    trie<topic_t> topics;
     auto add = [&topics](const std::string& topic)
         {topics.insert(topic, std::make_shared<topic_t>(topic));};
     std::string topicFilter = "/a/+/+";
@@ -611,29 +634,26 @@ void test_trie12(trie<topic_t>& topics)
 
 void test_trie()
 {
-    std::vector<trie<topic_t>> t;
-    t.resize(20);
-
-    test_trie1(t[0]);
-    test_trie2(t[1]);
-    test_trie3(t[2]);
-    test_trie4(t[3]);
-    test_trie5(t[4]);
-    test_trie6(t[5]);
-    test_trie7(t[6]);
-    test_trie8(t[7]);
-    test_trie9(t[8]);
-    test_trie10(t[9]);
-    test_trie11(t[10]);
-    test_trie12(t[11]);
+    test_trie1();
+    test_trie2();
+    test_trie3();
+    test_trie4();
+    test_trie5();
+    test_trie6();
+    test_trie7();
+    test_trie8();
+    test_trie9();
+    test_trie10();
+    test_trie11();
+    test_trie12();
 }
 
 void tests()
 {
     test_trie();
-    test_simple_pack_unpack();
-    test_mqtt_encode_decode_length();
-    test_pack_unpack();
+//    test_simple_pack_unpack();
+//    test_mqtt_encode_decode_length();
+//    test_pack_unpack();
 }
 
 #define CONNECT_BYTE 0x10
@@ -823,6 +843,8 @@ public:
 
         if (pkt.header.bits.qos == AT_LEAST_ONCE)
             ack.header = PUBACK_BYTE;
+        else if (pkt.header.bits.qos == EXACTLY_ONCE)
+            ack.header = PUBREC_BYTE;
         ack.pkt_id = pkt.pkt_id;
 
         ack.pack(msg);
@@ -844,6 +866,7 @@ public:
 int main()
 {
 //    tests();
+
     std::cout << "[" << std::this_thread::get_id() << "]MAIN THREAD\n";
 
 #ifdef CLIENT
@@ -870,7 +893,7 @@ int main()
     con.vhdr.bits.will = 1;
     con.vhdr.bits.will_qos = AT_LEAST_ONCE;
     con.vhdr.bits.will_retain = 1;
-    con.payload.client_id = "foo4";
+    con.payload.client_id = "foo";
     con.payload.keepalive = 0xffff;
     con.payload.will_topic = "/example";
     con.payload.will_message = "[X]WILL: " + con.payload.client_id + " is dead";
@@ -931,7 +954,8 @@ int main()
                         mqtt_publish resp;
                         resp.header = msg.hdr.byte;
                         resp.unpack(msg);
-                        client.ack(resp);
+                        if (resp.header.bits.qos > 0)
+                            client.ack(resp);
                         std::cout << "\n\t{PUBLISH}\n" << resp;
                         break;
                     }

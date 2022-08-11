@@ -84,11 +84,14 @@ namespace tps
 
             void shutdown_cleanup(server_interface<T>* server)
             {
-                m_socket.close();
-                if (m_nOwnerType == owner::server)
+                if (is_connected())
                 {
-                    server->on_client_disconnect(this->shared_from_this());
-                    server->delete_client(this->shared_from_this());
+                    m_socket.close();
+                    if (m_nOwnerType == owner::server)
+                    {
+                        server->on_client_disconnect(this->shared_from_this());
+                        server->delete_client(this->shared_from_this());
+                    }
                 }
             }
 

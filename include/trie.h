@@ -13,7 +13,7 @@ struct trie_node
 {
     trie_node() {children.reserve(ALPHABET_SIZE/6);}
     ~trie_node() {}
-    std::unordered_map<char, std::shared_ptr<trie_node>> children; // list of children (child is a next symbol in topic name)
+    std::unordered_map<char, std::unique_ptr<trie_node>> children; // list of children (child is a next symbol in topic name)
     std::shared_ptr<T> data;  // data associated with node (topic structure, contains subscribers info)
 };
 
@@ -34,7 +34,7 @@ public:
 
             // No match, we add a new node
             if (it == cursor->children.end())
-                it = cursor->children.emplace(key, std::make_shared<trie_node<T>>()).first;
+                it = cursor->children.emplace(key, std::make_unique<trie_node<T>>()).first;
             cursor = it->second.get();
         }
 

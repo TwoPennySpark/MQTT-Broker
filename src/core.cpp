@@ -13,12 +13,13 @@ void ::core::delete_client(std::shared_ptr<client_t>& client)
             if (topic.second.unsub(client, false) && !topic.second.subscribers.size())
                 topics.erase(topic.first);
 
-        clients.erase(client->netClient);
-        client->netClient.reset();
         clientsIDs.erase(client->clientID);
     }
     else
         client->active = false;
+
+    clients.erase(client->netClient);
+    client->netClient.reset();
 }
 
 void topic::sub(std::shared_ptr<client> &client, uint8_t qos)
@@ -26,7 +27,7 @@ void topic::sub(std::shared_ptr<client> &client, uint8_t qos)
     auto it = subscribers.find(client->clientID);
     // if client is already subscribed - update it's qos [MQTT-3.8.4-3]
     if (it != subscribers.end())
-        it->second.second = qos; // TODO:resend retained msg  [MQTT-3.8.4-3]
+        it->second.second = qos;
     else
     {
         // add new client to the list of subs

@@ -157,12 +157,8 @@ struct mqtt_subscribe: public mqtt_packet
     mqtt_subscribe(uint8_t _hdr): mqtt_packet (_hdr) {}
 
     uint16_t pkt_id;
-    struct tuple {
-        uint16_t topiclen;
-        std::string topic;
-        uint8_t qos;
-    };
-    std::vector<tuple> tuples;
+    // topiclen, topic, qos
+    std::vector<std::tuple<uint16_t, std::string, uint8_t>> tuples;
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_subscribe& pkt);
 
@@ -175,11 +171,8 @@ struct mqtt_unsubscribe: public mqtt_packet
     mqtt_unsubscribe(uint8_t _hdr): mqtt_packet (_hdr) {}
 
     uint16_t pkt_id;
-    struct tuple {
-        uint16_t topiclen;
-        std::string topic;
-    };
-    std::vector<tuple> tuples;
+    // topiclen, topic
+    std::vector<std::pair<uint16_t, std::string>> tuples;
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_unsubscribe& pkt);
 
@@ -241,5 +234,6 @@ typedef struct mqtt_packet mqtt_disconnect;
 uint8_t mqtt_encode_length(tps::net::message<mqtt_header> &msg, size_t len);
 uint32_t mqtt_decode_length(tps::net::message<mqtt_header> &msg);
 
+uint16_t byteswap16(uint16_t x);
 
 #endif // MQTT_H

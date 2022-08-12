@@ -29,6 +29,7 @@ namespace tps
         {
             message_header<T> hdr{};
             uint8_t writeHdrSize = sizeof(T);
+
             std::vector<uint8_t> body;
 
             size_t size() const

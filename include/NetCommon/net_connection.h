@@ -31,7 +31,7 @@ namespace tps
 
             ~connection()
             {
-
+                std::cout << "[!]CONNECTION DELETED\n";
             }
 
             void connect_to_client(uint32_t uid, server_interface<T>* server)
@@ -82,6 +82,11 @@ namespace tps
                 return m_id;
             }
 
+            void set_timer(bool flag)
+            {
+
+            }
+
             void shutdown_cleanup(server_interface<T>* server)
             {
                 if (is_connected())
@@ -99,16 +104,13 @@ namespace tps
             template <typename Type>
             void send(Type&& msg, server_interface<T>* server)
             {
-//                std::cout << "[" << std::this_thread::get_id() << "]SEND BEFORE\n";
                 asio::post(m_asioContext, [this, server, msg = std::forward<Type>(msg)]() mutable
                 {
-//                    printf("SEND %d header bytes + 0x%x body bytes: HDR:0x%x\n", msg.writeHdrSize, msg.hdr.size, msg.hdr.byte.byte);
                     bool bWritingMessage = !m_qMessageOut.empty();
                     m_qMessageOut.push_back(std::forward<Type>(msg));
                     if (!bWritingMessage)
                         write_header(server);
                 });
-//                std::cout << "[" << std::this_thread::get_id() << "]SEND AFTER\n";
             }
 
             class decode_len_t
@@ -120,8 +122,6 @@ namespace tps
                 {
                     static uint32_t len = 0;
                     static uint8_t lenIndex = 0;
-
-//                    printf("DECODE:%d %d %d\n", size, m_msgTempIn.hdr.byte.byte, m_msgTempIn.hdr.size);
 
                     if (ec)
                         return 0;
@@ -252,14 +252,13 @@ namespace tps
 
             void add_to_incoming_message_queue(server_interface<T>* server)
             {
-//                std::cout << "[" << std::this_thread::get_id() << "]add_to_incoming_message_queue BEFORE\n";
-
                 if (m_nOwnerType == owner::server)
-                    m_qMessageIn.push_back(owned_message<T>({this->shared_from_this(), std::move(m_msgTempIn)})); // server has an array of connections, so it needs to know which connection owns incoming message<T>
+                    // server has an array of connections, so it needs to know which connection owns incoming message
+                    m_qMessageIn.push_back(owned_message<T>({this->shared_from_this(), std::move(m_msgTempIn)}));
                 else
-                    m_qMessageIn.push_back(owned_message<T>({nullptr, std::move(m_msgTempIn)})); // client has only 1 connection, this connection will own all of incoming msgs
+                    // client has only 1 connection, this connection will own all of incoming msgs
+                    m_qMessageIn.push_back(owned_message<T>({nullptr, std::move(m_msgTempIn)}));
 
-//                std::cout << "[" << std::this_thread::get_id() << "]add_to_incoming_message_queue AFTER\n";
                 read_header(server);
             }
 
@@ -341,6 +340,8 @@ namespace tps
             owner m_nOwnerType = owner::server;
 
             uint32_t m_id = 0;
+
+            bool m_measureTime = false;
         };
     }
 }

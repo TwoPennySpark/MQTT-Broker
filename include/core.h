@@ -1,11 +1,11 @@
 #ifndef CORE_H
 #define CORE_H
 
-#include <list>
 #include <set>
 #include <unordered_map>
 #include <memory>
 #include <iostream>
+#include <chrono>
 #include <boost/algorithm/string.hpp>
 #include "trie.h"
 #include "mqtt.h"
@@ -28,7 +28,8 @@ struct session
     std::unordered_map<uint16_t, uint8_t> unregPubrel;
     std::set<uint16_t> unregPubcomp;
 
-    std::vector<tps::net::message<mqtt_header>> savedMsgs;
+    // first - msg, second - pkt ID
+    std::vector<std::pair<tps::net::message<mqtt_header>, uint16_t>> savedMsgs;
 
     void clear()
     {
@@ -55,6 +56,7 @@ typedef struct client
     std::optional<std::string> password;
 
     uint16_t keepalive;
+
     std::shared_ptr<tps::net::connection<mqtt_header>> netClient;
 }client_t;
 

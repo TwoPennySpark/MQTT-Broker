@@ -13,13 +13,18 @@ void server::on_client_disconnect(std::shared_ptr<tps::net::connection<mqtt_head
     m_qMessagesIn.push_back(tps::net::owned_message<mqtt_header>({std::move(client), std::move(msg)}));
 }
 
-bool server::on_first_message(std::shared_ptr<tps::net::connection<mqtt_header>>,
+bool server::on_first_message(std::shared_ptr<tps::net::connection<mqtt_header>> netClient,
                               tps::net::message<mqtt_header>& msg)
 {
     const uint8_t CONNECT_MIN_SIZE = 12;
     if (packet_type(msg.hdr.byte.bits.type) == packet_type::CONNECT
             && msg.hdr.size >= CONNECT_MIN_SIZE)
+    {
+        // keepalive bytes
+        if (msg.body[10] != 0 || msg.body[9] != 0)
+            netClient->set_timer(true);
         return true;
+    }
     else
         return false;
 }
@@ -41,6 +46,11 @@ void server::on_message(std::shared_ptr<tps::net::connection<mqtt_header>>& netC
     if (it == m_core.clients.end())
         return;
     auto& client = it->second;
+
+    if (client->keepalive)
+    {
+
+    }
 
     switch (type)
     {
@@ -136,6 +146,8 @@ void server::handle_connect(std::shared_ptr<tps::net::connection<mqtt_header>>& 
             nh.key() = netClient;
             m_core.clients.insert(std::move(nh));
         }
+        else
+            m_core.clients.emplace(netClient, existingClient);
 
         // return of the client
         // if there is a stored session (previous CONNECT packet from
@@ -171,8 +183,7 @@ void server::handle_connect(std::shared_ptr<tps::net::connection<mqtt_header>>& 
     client->session.cleanSession = pkt.vhdr.bits.clean_session;
     if (pkt.vhdr.bits.will)
     {
-        mqtt_publish willMsg;
-        willMsg.header.byte = PUBLISH_BYTE;
+        mqtt_publish willMsg(PUBLISH_BYTE);
         willMsg.header.bits.qos = pkt.vhdr.bits.will_qos;
         willMsg.header.bits.retain = pkt.vhdr.bits.will_retain;
         willMsg.topic = std::move(pkt.payload.will_topic);
@@ -185,26 +196,28 @@ void server::handle_connect(std::shared_ptr<tps::net::connection<mqtt_header>>& 
     if (pkt.vhdr.bits.password)
         client->password = std::move(pkt.payload.password);
     client->keepalive = pkt.payload.keepalive;
-    client->netClient = netClient;
+    client->netClient = std::move(netClient);
 
     // send CONNACK response
     tps::net::message<mqtt_header> reply;
     connack.rc = 0;
     connack.pack(reply);
-    message_client(netClient, std::move(reply));
+    message_client(client->netClient, std::move(reply));
 
-//    if (connack.sp.byte)
-//    {
-//        for (auto& msg: client->session.savedMsgs)
-//        {
-//            if (msg.hdr.byte.bits.qos == AT_LEAST_ONCE)
-//                client->session.unregPuback.insert(msg.pkt_id);
-//            else
-//                client->session.unregPubrec.insert(msg.pkt_id);
+    // if client restores session send all saved msgs
+    if (connack.sp.byte)
+    {
+        for (auto& [msg, id]: client->session.savedMsgs)
+        {
+            if (msg.hdr.byte.bits.qos == AT_LEAST_ONCE)
+                client->session.unregPuback.emplace(id);
+            else
+                client->session.unregPubrec.emplace(id, 0);
 
-//            message_client(netClient, msg);
-//        }
-//    }
+            message_client(client->netClient, std::move(msg));
+        }
+        client->session.savedMsgs.clear();
+    }
 }
 
 void server::handle_subscribe(std::shared_ptr<client_t> &client, mqtt_subscribe& pkt)
@@ -219,37 +232,37 @@ void server::handle_subscribe(std::shared_ptr<client_t> &client, mqtt_subscribe&
         retainedMsgs.emplace_back(std::move(pubmsg));
     };
 
-    for (auto& tuple: pkt.tuples)
+    for (auto& [topiclen, topicfilter, qos]: pkt.tuples)
     {
         // if topic filter cotains wildcards
-        if (tuple.topic[0] == '+' || tuple.topic[tuple.topic.length()-1] == '#'
-                || tuple.topic.find("/+") != std::string::npos)
+        if (topicfilter[0] == '+' || topicfilter[topiclen-1] == '#'
+                || topicfilter.find("/+") != std::string::npos)
         {
-            auto matches = m_core.get_matching_topics(tuple.topic);
+            auto matches = m_core.get_matching_topics(topicfilter);
             for (auto& topic: matches)
             {
-                topic->sub(client, tuple.qos);
+                topic->sub(client, qos);
                 if (topic->retain)
-                    save_retained_msg(topic, tuple.qos);
+                    save_retained_msg(topic, qos);
             }
         }
         else
         {
             std::shared_ptr<topic_t> topic;
-            auto topicNode = m_core.topics.find(tuple.topic);
+            auto topicNode = m_core.topics.find(topicfilter);
             if (topicNode && topicNode->data) // if topic already exists
                 topic = topicNode->data;
             else
             { // create new topic
-                auto newTopic = std::make_shared<topic_t>(tuple.topic);
-                m_core.topics.insert(tuple.topic, newTopic);
+                auto newTopic = std::make_shared<topic_t>(topicfilter);
+                m_core.topics.insert(topicfilter, newTopic);
                 topic = newTopic;
             }
-            topic->sub(client, tuple.qos);
+            topic->sub(client, qos);
             if (topic->retain)
-                save_retained_msg(topic, tuple.qos);
+                save_retained_msg(topic, qos);
         }
-        suback.rcs.push_back(tuple.qos);
+        suback.rcs.push_back(qos);
     }
 
     // send SUBACK response
@@ -265,13 +278,13 @@ void server::handle_subscribe(std::shared_ptr<client_t> &client, mqtt_subscribe&
 
 void server::handle_unsubscribe(std::shared_ptr<client_t> &client, mqtt_unsubscribe& pkt)
 {
-    for (auto& tuple: pkt.tuples)
+    for (auto& [topiclen, topicfilter]: pkt.tuples)
     {
         // if topic filter cotains wildcards
-        if (tuple.topic[0] == '+' || tuple.topic[tuple.topic.length()-1] == '#'
-                || tuple.topic.find("/+") != std::string::npos)
+        if (topicfilter[0] == '+' || topicfilter[topiclen-1] == '#'
+                || topicfilter.find("/+") != std::string::npos)
         {
-            auto matches = m_core.get_matching_topics(tuple.topic);
+            auto matches = m_core.get_matching_topics(topicfilter);
             for (auto& topic: matches)
                 // delete topic if there is no more subscribers
                 if (topic->unsub(client, true) && !topic->subscribers.size())
@@ -279,7 +292,7 @@ void server::handle_unsubscribe(std::shared_ptr<client_t> &client, mqtt_unsubscr
         }
         else
         {
-            auto topicNode = m_core.topics.find(tuple.topic);
+            auto topicNode = m_core.topics.find(topicfilter);
             if (topicNode && topicNode->data)
             {
                 auto& topic = topicNode->data;
@@ -355,17 +368,17 @@ void server::publish_msg(mqtt_publish& pkt)
             auto& subClient = sub.second.first;
             if (subClient.active)
             {
-                if (temp.hdr.byte.bits.qos == AT_LEAST_ONCE)
+                if (qos == AT_LEAST_ONCE)
                     subClient.session.unregPuback.insert(pkt.pkt_id);
-                else if (temp.hdr.byte.bits.qos == EXACTLY_ONCE)
+                else if (qos == EXACTLY_ONCE)
                     subClient.session.unregPubrec.emplace(uint16_t(pkt.pkt_id), 0);
                 message_client(subClient.netClient, std::move(temp));
             }
             else
             {
                 // save msgs until session is restored
-                if (temp.hdr.byte.bits.qos > AT_MOST_ONCE)
-                    subClient.session.savedMsgs.emplace_back(std::move(temp));
+                if (qos > AT_MOST_ONCE)
+                    subClient.session.savedMsgs.emplace_back(std::move(temp), pkt.pkt_id);
             }
         }
     }

@@ -11,10 +11,10 @@ public:
     server(uint16_t port): tps::net::server_interface<mqtt_header>(port) {}
 
 protected:
-    virtual bool on_client_connect(std::shared_ptr<tps::net::connection<mqtt_header>> client) override;
-    virtual void on_client_disconnect(std::shared_ptr<tps::net::connection<mqtt_header>> client) override;
-    virtual bool on_first_message(std::shared_ptr<tps::net::connection<mqtt_header>> netClient,
-                                  tps::net::message<mqtt_header>& msg) override;
+    virtual bool on_client_connect    (std::shared_ptr<tps::net::connection<mqtt_header>> client) override;
+    virtual void on_client_disconnect (std::shared_ptr<tps::net::connection<mqtt_header>> client) override;
+    virtual bool on_first_message     (std::shared_ptr<tps::net::connection<mqtt_header>> netClient,
+                                       tps::net::message<mqtt_header>& msg) override;
 
     virtual void on_message(std::shared_ptr<tps::net::connection<mqtt_header>>& netClient,
                             tps::net::message<mqtt_header>& msg) override;

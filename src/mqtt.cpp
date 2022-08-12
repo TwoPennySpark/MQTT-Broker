@@ -1,7 +1,6 @@
 #include "mqtt.h"
 #include "NetCommon/net_message.h"
 
-
 uint8_t mqtt_encode_length(tps::net::message<mqtt_header>& msg, size_t len)
 {
     uint8_t bytes = 0;
@@ -36,6 +35,11 @@ uint32_t mqtt_decode_length(tps::net::message<mqtt_header>& msg)
     } while (((lenV[bytes++] & 128) != 0) && bytes < MAX_REMAINING_LENGTH_SIZE);
 
     return len;
+}
+
+uint16_t byteswap16(uint16_t x)
+{
+    return (uint16_t(x >> 8) | uint16_t(x << 8));
 }
 
 std::ostream& operator<<(std::ostream& os, const mqtt_header& pkt)
@@ -98,9 +102,9 @@ std::ostream& operator<<(std::ostream &os, const mqtt_subscribe &pkt)
 {
     os << pkt.header;
     os << "\tPKT ID: " << pkt.pkt_id << std::endl;
-    for (auto& t: pkt.tuples)
-        os << "\tTOPIC[" << t.topiclen << "]: "
-           << "\"" << t.topic << "\": " << std::to_string(t.qos) << std::endl;
+    for (auto& [topiclen, topic, qos]: pkt.tuples)
+        os << "\tTOPIC[" << topiclen << "]: "
+           << "\"" << topic << "\": " << std::to_string(qos) << std::endl;
     os << "\t================END BODY================\n\n";
 
     return os;
@@ -110,9 +114,9 @@ std::ostream& operator<<(std::ostream &os, const mqtt_unsubscribe &pkt)
 {
     os << pkt.header;
     os << "\tPKT ID: " << pkt.pkt_id << std::endl;
-    for (auto& t: pkt.tuples)
-        os << "\tTOPIC[" << t.topiclen << "]: "
-           << "\"" << t.topic << "\"" << std::endl;
+    for (auto& [topiclen, topic]: pkt.tuples)
+        os << "\tTOPIC[" << topiclen << "]: "
+           << "\"" << topic << "\"" << std::endl;
     os << "\t================END BODY================\n\n";
 
     return os;
@@ -192,6 +196,7 @@ void mqtt_connect::unpack(tps::net::message<mqtt_header>& msg)
 {
     uint16_t protocolLen = 0;
     msg >> protocolLen;
+    protocolLen = byteswap16(protocolLen);
 
     std::string protocolName;
     protocolName.resize(protocolLen);
@@ -203,9 +208,11 @@ void mqtt_connect::unpack(tps::net::message<mqtt_header>& msg)
     msg >> vhdr.byte;
 
     msg >> payload.keepalive;
+    payload.keepalive = byteswap16(payload.keepalive);
 
     uint16_t clientIDLength = 0;
     msg >> clientIDLength;
+    clientIDLength = byteswap16(clientIDLength);
 
     payload.client_id.resize(clientIDLength);
     msg >> payload.client_id;
@@ -214,11 +221,13 @@ void mqtt_connect::unpack(tps::net::message<mqtt_header>& msg)
     {
         uint16_t willTopicLen = 0;
         msg >> willTopicLen;
+        willTopicLen = byteswap16(willTopicLen);
         payload.will_topic.resize(willTopicLen);
         msg >> payload.will_topic;
 
         uint16_t willMsgLen = 0;
         msg >> willMsgLen;
+        willMsgLen = byteswap16(willMsgLen);
         payload.will_message.resize(willMsgLen);
         msg >> payload.will_message;
     }
@@ -227,6 +236,7 @@ void mqtt_connect::unpack(tps::net::message<mqtt_header>& msg)
     {
         uint16_t usernameLen = 0;
         msg >> usernameLen;
+        usernameLen = byteswap16(usernameLen);
         this->payload.username.resize(usernameLen);
         msg >> payload.username;
     }
@@ -235,6 +245,7 @@ void mqtt_connect::unpack(tps::net::message<mqtt_header>& msg)
     {
         uint16_t passwordLen = 0;
         msg >> passwordLen;
+        passwordLen = byteswap16(passwordLen);
         payload.username.resize(passwordLen);
         msg >> payload.username;
     }
@@ -247,6 +258,7 @@ void mqtt_subscribe::unpack(tps::net::message<mqtt_header>& msg)
         return;
 
     msg >> pkt_id;
+    pkt_id = byteswap16(pkt_id);
 
     uint32_t remainingBytes = msg.hdr.size - sizeof(pkt_id);
 
@@ -258,20 +270,23 @@ void mqtt_subscribe::unpack(tps::net::message<mqtt_header>& msg)
     {
         tuples.resize(count+1);
 
-        msg >> tuples[count].topiclen;
-        if (!tuples[count].topiclen) // [MQTT-4.7.3-1]
+        auto& [topiclen, topic, qos] = tuples[count];
+
+        msg >> topiclen;
+        topiclen = byteswap16(topiclen);
+
+        if (!topiclen) // [MQTT-4.7.3-1]
             return;
-        remainingBytes -= sizeof(tuples[count].topiclen);
+        remainingBytes -= sizeof(topiclen);
 
-        tuples[count].topic.resize(tuples[count].topiclen);
-        msg >> tuples[count].topic;
-        msg >> tuples[count].qos;
+        topic.resize(topiclen);
+        msg >> topic;
+        msg >> qos;
 
-        if (tuples[count].qos > EXACTLY_ONCE)
+        if (qos > EXACTLY_ONCE)
             return;
 
-        remainingBytes -= tuples[count].topiclen +
-                          sizeof(tuples[count].qos);
+        remainingBytes -= topiclen + sizeof(qos);
         count++;
     }
 }
@@ -279,6 +294,7 @@ void mqtt_subscribe::unpack(tps::net::message<mqtt_header>& msg)
 void mqtt_unsubscribe::unpack(tps::net::message<mqtt_header>& msg)
 {
     msg >> pkt_id;
+    pkt_id = byteswap16(pkt_id);
 
     uint32_t remainingBytes = msg.hdr.size - sizeof(pkt_id);
 
@@ -286,12 +302,15 @@ void mqtt_unsubscribe::unpack(tps::net::message<mqtt_header>& msg)
     while (remainingBytes > 0)
     {
         tuples.resize(count+1);
-        msg >> tuples[count].topiclen;
-        remainingBytes -= sizeof(tuples[count].topiclen);
+        auto& [topiclen, topic] = tuples[count];
 
-        tuples[count].topic.resize(tuples[count].topiclen);
-        msg >> tuples[count].topic;
-        remainingBytes -= tuples[count].topiclen;
+        msg >> topiclen;
+        topiclen = byteswap16(topiclen);
+        remainingBytes -= sizeof(topiclen);
+
+        topic.resize(topiclen);
+        msg >> topic;
+        remainingBytes -= topiclen;
         count++;
     }
 }
@@ -299,6 +318,7 @@ void mqtt_unsubscribe::unpack(tps::net::message<mqtt_header>& msg)
 void mqtt_publish::unpack(tps::net::message<mqtt_header>& msg)
 {
     msg >> topiclen;
+    topiclen = byteswap16(topiclen);
 
     topic.resize(topiclen);
     msg >> topic;
@@ -310,6 +330,7 @@ void mqtt_publish::unpack(tps::net::message<mqtt_header>& msg)
     if (header.bits.qos > AT_MOST_ONCE)
     {
         msg >> pkt_id;
+        pkt_id = byteswap16(pkt_id);
         payloadlen -= sizeof(pkt_id);
     }
 
@@ -320,6 +341,7 @@ void mqtt_publish::unpack(tps::net::message<mqtt_header>& msg)
 void mqtt_suback::unpack(tps::net::message<mqtt_header>& msg)
 {
     msg >> pkt_id;
+    pkt_id = byteswap16(pkt_id);
 
     uint16_t rcsBytes = msg.hdr.size - sizeof(pkt_id);
     rcs.resize(rcsBytes);
@@ -329,6 +351,7 @@ void mqtt_suback::unpack(tps::net::message<mqtt_header>& msg)
 void mqtt_ack::unpack(tps::net::message<mqtt_header>& msg)
 {
     msg >> pkt_id;
+    pkt_id = byteswap16(pkt_id);
 }
 
 void mqtt_packet::pack(tps::net::message<mqtt_header>& msg)
@@ -346,10 +369,14 @@ void mqtt_publish::pack(tps::net::message<mqtt_header>& msg)
         remainingLen += sizeof(pkt_id);
     msg.writeHdrSize += mqtt_encode_length(msg, remainingLen);
 
-    msg << topiclen;
+    uint16_t topiclenbe = byteswap16(topiclen);
+    msg << topiclenbe;
     msg << topic;
     if (header.bits.qos > AT_MOST_ONCE)
-        msg << pkt_id;
+    {
+        uint16_t pkt_idbe = byteswap16(pkt_id);
+        msg << pkt_idbe;
+    }
     msg << payload;
 }
 
@@ -367,7 +394,8 @@ void mqtt_suback::pack(tps::net::message<mqtt_header>& msg)
     msg.hdr.byte = header.byte;
     msg.writeHdrSize += mqtt_encode_length(msg, sizeof(pkt_id) + rcs.size());
 
-    msg << pkt_id;
+    uint16_t pkt_idbe = byteswap16(pkt_id);
+    msg << pkt_idbe;
     msg << rcs;
 }
 
@@ -376,5 +404,6 @@ void mqtt_ack::pack(tps::net::message<mqtt_header>& msg)
     msg.hdr.byte = header.byte;
     msg.writeHdrSize += mqtt_encode_length(msg, sizeof(pkt_id));
 
-    msg << pkt_id;
+    uint16_t pkt_idbe = byteswap16(pkt_id);
+    msg << pkt_idbe;
 }

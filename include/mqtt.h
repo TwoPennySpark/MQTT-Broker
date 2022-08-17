@@ -4,9 +4,6 @@
 #include <memory>
 #include <vector>
 
-#define MQTT_HEADER_LEN_MIN 2 // header(1 byte) + min possible len of Remaining Length field(1 byte)
-#define MQTT_HEADER_LEN_MAX 5 // header(1 byte) + max possible len of Remaining Length field(4 byte)
-
 /*
  * Stub bytes, useful for generic replies, these represent the first byte in
  * the fixed header
@@ -101,7 +98,7 @@ struct mqtt_connect: public mqtt_packet
         uint8_t byte;
         struct {
             int8_t reserved : 1;
-            uint8_t clean_session : 1;
+            uint8_t cleanSession : 1;
             uint8_t will : 1;
             uint8_t will_qos : 2;
             uint8_t will_retain : 1;
@@ -130,7 +127,7 @@ struct mqtt_connect: public mqtt_packet
 
 struct mqtt_connack: public mqtt_packet
 {
-    mqtt_connack() = default;
+    mqtt_connack(): mqtt_packet(CONNACK_BYTE) {}
     mqtt_connack(uint8_t _hdr): mqtt_packet (_hdr) {}
 
     union session
@@ -181,7 +178,7 @@ struct mqtt_unsubscribe: public mqtt_packet
 
 struct mqtt_suback: public mqtt_packet
 {
-    mqtt_suback() = default;
+    mqtt_suback(): mqtt_packet(SUBACK_BYTE) {}
     mqtt_suback(uint8_t _hdr): mqtt_packet (_hdr){}
 
     uint16_t pkt_id;
@@ -195,7 +192,7 @@ struct mqtt_suback: public mqtt_packet
 
 struct mqtt_publish: public mqtt_packet
 {
-    mqtt_publish() = default;
+    mqtt_publish(): mqtt_packet(PUBLISH_BYTE) {}
     mqtt_publish(uint8_t _hdr): mqtt_packet (_hdr) {}
 
     uint16_t pkt_id;

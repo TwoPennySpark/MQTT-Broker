@@ -62,7 +62,7 @@ std::ostream& operator<<(std::ostream &os, const mqtt_connect &pkt)
 {
     os << pkt.header;
     os << "\tCLIENT ID: \"" << pkt.payload.client_id << "\"" << std::endl;
-    os << "\tCLEAN SESSION: " << std::to_string(pkt.vhdr.bits.clean_session) << std::endl;
+    os << "\tCLEAN SESSION: " << std::to_string(pkt.vhdr.bits.cleanSession) << std::endl;
     os << "\tKEEPALIVE: " << pkt.payload.keepalive << std::endl;
     if (pkt.vhdr.bits.will)
     {

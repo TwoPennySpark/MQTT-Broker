@@ -544,7 +544,7 @@ void test_trie9()
     std::string topicFilter = "+/#";
     std::vector<std::string> valid = {"a/b/", "a/b/cc/ddd/eeee/fffff/",
                                        "a/b/c", "/a/b/c", "/f/g/h/"};
-    std::vector<std::string> invalid = {"cccc"};
+    std::vector<std::string> invalid = {"cccc"}; //
     for (auto& el: invalid)
         add(el);
     for (auto& el: valid)
@@ -660,6 +660,7 @@ void tests()
 #define SUBREQ_BYTE  0x80
 #define UNSUB_BYTE   0xA0
 #define PINGREQ_BYTE 0xC0
+#define DISC_BYTE    0xE0
 
 template <typename T>
 class MQTTClient: public tps::net::client_interface<T>
@@ -820,7 +821,7 @@ public:
         subreq.pkt_id = pktID++;
 
         std::tuple<uint16_t, std::string, uint8_t> t;
-        auto& [topiclen, topic, qos] = t;
+        auto& [topiclen, topic, qos] = t;{}
         topic = "/example";
         topiclen = uint16_t(topic.size());
         qos = AT_LEAST_ONCE;
@@ -839,7 +840,7 @@ public:
         unsub.pkt_id = pktID++;
 
         std::pair<uint16_t, std::string> t;
-        auto& [topiclen, topic] = t;
+        auto& [topiclen, topic] = t;{}
         topic = "/example";
         topiclen = uint16_t(topic.size());
         unsub.tuples.emplace_back(t);
@@ -848,6 +849,15 @@ public:
         pack_unsubscribe(unsub, msg);
         this->send(std::move(msg));
     }
+
+    void disconnect()
+    {
+        mqtt_disconnect disc(DISC_BYTE);
+        tps::net::message<T> msg;
+        disc.pack(msg);
+        this->send(std::move(msg));
+    }
+
 
     void ack(mqtt_ack& ack)
     {
@@ -874,7 +884,6 @@ int main()
 //    tests();
 
     std::cout << "[" << std::this_thread::get_id() << "]MAIN THREAD\n";
-
 #ifdef CLIENT
     MQTTClient<mqtt_header> client;
     client.connect("127.0.0.1", 5000);
@@ -895,12 +904,12 @@ int main()
     });
 
     mqtt_connect con(CONNECT_BYTE);
-    con.vhdr.bits.clean_session = 1;
+    con.vhdr.bits.cleanSession = 1;
     con.vhdr.bits.will = 1;
     con.vhdr.bits.will_qos = AT_LEAST_ONCE;
     con.vhdr.bits.will_retain = 1;
     con.payload.client_id = "foo1";
-    con.payload.keepalive = 0xffff;
+    con.payload.keepalive = 0;
     con.payload.will_topic = "/example";
     con.payload.will_message = "[X]WILL: " + con.payload.client_id + " is dead";
 
@@ -921,15 +930,14 @@ int main()
                     case 2: client.subscribe(); break;
                     case 3: client.unsubscribe(); break;
                     case 4: client.pingreq(); break;
-                    case 5: return 0;
+                    case 5: client.disconnect(); break;
+                    case 6: return 0;
                 }
             }
 
             if (!client.incoming().empty())
             {
-//                std::cout << "[" << std::this_thread::get_id() << "]MAIN POP BEFORE\n";
                 tps::net::message<mqtt_header> msg = client.incoming().pop_front().msg;
-//                std::cout << "[" << std::this_thread::get_id() << "]MAIN POP AFTER\n";
 
                 switch (packet_type(msg.hdr.byte.bits.type))
                 {

@@ -4,7 +4,7 @@
 #include "net_common.h"
 #include "net_message.h"
 #include "net_tsqueue.h"
-
+#include "boost/date_time/posix_time/posix_time.hpp"
 namespace tps
 {
     namespace net
@@ -69,7 +69,14 @@ namespace tps
             // ASYNC
             void disconnect()
             {
-                asio::post(m_asioContext, [this](){if (m_socket.is_open()) m_socket.close();});
+                asio::post(m_asioContext, [this]()
+                {
+                    if (m_socket.is_open())
+                    {
+                        sleep(1); //
+                        m_socket.close();
+                    }
+                });
             }
 
             bool is_connected() const
@@ -82,9 +89,10 @@ namespace tps
                 return m_id;
             }
 
-            void set_timer(bool flag)
+            void set_timer(uint16_t sec)
             {
-
+                std::cout << "TIMER SEC:" << sec << "\n";
+                timer = boost::asio::deadline_timer(m_asioContext, boost::posix_time::seconds(sec));
             }
 
             void shutdown_cleanup(server_interface<T>* server)
@@ -92,6 +100,7 @@ namespace tps
                 if (is_connected())
                 {
                     m_socket.close();
+                    std::cout << "SOCKET CLOSE\n";
                     if (m_nOwnerType == owner::server)
                     {
                         server->on_client_disconnect(this->shared_from_this());
@@ -159,11 +168,32 @@ namespace tps
             // ASYNC
             void read_header(server_interface<T>* server)
             {
+                if (timer)
+                    timer->async_wait([this](const std::error_code& ec) {
+                        if (!ec)
+                            m_socket.cancel();
+//                        else
+                            std::cout << "-------------------------------------------\n";
+//                            std::cout << "LOL:" << boost::asio::time_traits<boost::posix_time::ptime>::to_posix_duration(timer->expires_from_now()) << "\n";
+                        auto a = boost::asio::time_traits<boost::posix_time::ptime>::to_posix_duration(timer->expires_from_now());
+                        std::cout << "LOL" << to_simple_string(a) << "\n";
+
+                    });
+
                 asio::async_read(m_socket, asio::buffer(&m_msgTempIn.hdr, sizeof(m_msgTempIn.hdr)+1), decode_len(m_msgTempIn),
                     [this, server](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
+//                            if (m_nOwnerType == owner::server)
+//                                sleep(5);
+                            if (timer)
+                            {
+                                auto a = boost::asio::time_traits<boost::posix_time::ptime>::to_posix_duration(timer->expires_from_now());
+                                std::cout << "KEK" << to_simple_string(a) << "\n";
+                                timer->expires_from_now(boost::posix_time::seconds(5));
+                            }
+
                             if (m_msgTempIn.hdr.size > 0)
                             {
                                 printf("HDR:%d SIZE:%d\n", m_msgTempIn.hdr.byte.byte, m_msgTempIn.hdr.size);
@@ -341,7 +371,7 @@ namespace tps
 
             uint32_t m_id = 0;
 
-            bool m_measureTime = false;
+            std::optional<boost::asio::deadline_timer> timer;
         };
     }
 }

@@ -4,7 +4,7 @@
 #include "net_common.h"
 #include "net_message.h"
 #include "net_tsqueue.h"
-#include "boost/date_time/posix_time/posix_time.hpp"
+
 namespace tps
 {
     namespace net
@@ -31,7 +31,7 @@ namespace tps
 
             ~connection()
             {
-                std::cout << "[!]CONNECTION DELETED\n";
+                std::cout << "[!]CONNECTION DELETED: "<< m_id << "\n";
             }
 
             void connect_to_client(uint32_t uid, server_interface<T>* server)
@@ -67,14 +67,16 @@ namespace tps
             }
 
             // ASYNC
-            void disconnect()
+            void disconnect(server_interface<T>* server)
             {
-                asio::post(m_asioContext, [this]()
+                asio::post(m_asioContext, [this, server]()
                 {
                     if (m_socket.is_open())
                     {
                         sleep(1); //
+                        m_socket.shutdown(asio::ip::tcp::socket::shutdown_both);
                         m_socket.close();
+                        server->delete_client(this->shared_from_this());
                     }
                 });
             }
@@ -89,16 +91,17 @@ namespace tps
                 return m_id;
             }
 
-            void set_timer(uint16_t sec)
+            void set_timer(uint32_t mls)
             {
-                std::cout << "TIMER SEC:" << sec << "\n";
-                timer = boost::asio::deadline_timer(m_asioContext, boost::posix_time::seconds(sec));
+                m_timeoutMls = mls;
+                m_timer = boost::asio::deadline_timer(m_asioContext, boost::posix_time::millisec(m_timeoutMls.value()));
             }
 
             void shutdown_cleanup(server_interface<T>* server)
             {
                 if (is_connected())
                 {
+                    m_socket.shutdown(asio::ip::tcp::socket::shutdown_both);
                     m_socket.close();
                     std::cout << "SOCKET CLOSE\n";
                     if (m_nOwnerType == owner::server)
@@ -168,16 +171,11 @@ namespace tps
             // ASYNC
             void read_header(server_interface<T>* server)
             {
-                if (timer)
-                    timer->async_wait([this](const std::error_code& ec) {
+                if (m_timer)
+                    m_timer->async_wait([this](const std::error_code& ec)
+                    {
                         if (!ec)
                             m_socket.cancel();
-//                        else
-                            std::cout << "-------------------------------------------\n";
-//                            std::cout << "LOL:" << boost::asio::time_traits<boost::posix_time::ptime>::to_posix_duration(timer->expires_from_now()) << "\n";
-                        auto a = boost::asio::time_traits<boost::posix_time::ptime>::to_posix_duration(timer->expires_from_now());
-                        std::cout << "LOL" << to_simple_string(a) << "\n";
-
                     });
 
                 asio::async_read(m_socket, asio::buffer(&m_msgTempIn.hdr, sizeof(m_msgTempIn.hdr)+1), decode_len(m_msgTempIn),
@@ -185,14 +183,8 @@ namespace tps
                     {
                         if (!ec)
                         {
-//                            if (m_nOwnerType == owner::server)
-//                                sleep(5);
-                            if (timer)
-                            {
-                                auto a = boost::asio::time_traits<boost::posix_time::ptime>::to_posix_duration(timer->expires_from_now());
-                                std::cout << "KEK" << to_simple_string(a) << "\n";
-                                timer->expires_from_now(boost::posix_time::seconds(5));
-                            }
+                            if (m_timer)
+                                m_timer->expires_from_now(boost::posix_time::millisec(m_timeoutMls.value()));
 
                             if (m_msgTempIn.hdr.size > 0)
                             {
@@ -371,7 +363,8 @@ namespace tps
 
             uint32_t m_id = 0;
 
-            std::optional<boost::asio::deadline_timer> timer;
+            std::optional<boost::asio::deadline_timer> m_timer;
+            std::optional<uint32_t> m_timeoutMls;
         };
     }
 }

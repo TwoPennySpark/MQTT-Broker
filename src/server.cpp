@@ -21,7 +21,11 @@ bool server::on_first_message(pConnection netClient, tps::net::message<mqtt_head
     {
         // if keepalive bytes != 0
         if (msg.body[9] != 0 || msg.body[8] != 0)
-            netClient->set_timer(uint16_t(msg.body[9] | (uint16_t(msg.body[8]) << 8)));
+        {
+            uint16_t keepalive = uint16_t(msg.body[9] | (uint16_t(msg.body[8]) << 8));
+            uint32_t mls = keepalive * 1000 * 3 / 2; // [MQTT-3.1.2-24]
+            netClient->set_timer(mls);
+        }
         return true;
     }
     else
@@ -112,7 +116,7 @@ void server::handle_connect(pConnection& netClient, mqtt_connect& pkt)
 
         // deletion of the client
         // second CONNECT packet came from the same client(address) - violation [MQTT-3.1.0-2]
-        if (existingClient->netClient == netClient)
+        if (existingClient->netClient.get() == netClient)
         {
             disconnect(existingClient, DISCONNECT | PUBLISH_WILL);
             return; // no CONNACK reply [MQTT-3.1.4-1]
@@ -124,29 +128,27 @@ void server::handle_connect(pConnection& netClient, mqtt_connect& pkt)
         // so, in this implementation, new client only overtakes old client's session when new client's
         // clean session == 0
         if (existingClient->active)
-        {
             // transform old client into inactive state, even if it's clean session was originally == 1
             disconnect(existingClient, DISCONNECT, core_t::STORE_SESSION);
-        }
 
         // return of the client
         // if there is a stored session (previous CONNECT packet from
         // client with same client ID had clean session bit == 0)
         if (!pkt.vhdr.bits.cleanSession)
         {
-            client = m_core.restore_client(existingClient, netClient);
+            client = m_core.restore_client(existingClient, std::move(netClient));
             connack.sp.byte = 1;
         }
         else
         {
             // delete stored session
-            disconnect(client, NONE, core_t::FULL_DELETION);
+            disconnect(existingClient, NONE, core_t::FULL_DELETION);
 
-            client = m_core.add_new_client(pkt.payload.client_id, netClient);
+            client = m_core.add_new_client(std::move(pkt.payload.client_id), std::move(netClient));
         }
     }
     else
-        client = m_core.add_new_client(pkt.payload.client_id, netClient);
+        client = m_core.add_new_client(std::move(pkt.payload.client_id), std::move(netClient));
 
     client->active = true;
 
@@ -167,13 +169,13 @@ void server::handle_connect(pConnection& netClient, mqtt_connect& pkt)
     if (pkt.vhdr.bits.password)
         client->password = std::move(pkt.payload.password);
     client->keepalive = pkt.payload.keepalive;
-    client->netClient = std::move(netClient);
+//    client->netClient = std::move(netClient);
 
     // send CONNACK response
     tps::net::message<mqtt_header> reply;
     connack.rc = 0;
     connack.pack(reply);
-    message_client(client->netClient, std::move(reply));
+    client->netClient.get()->send(std::move(reply), this);
 
     // if client restores session send all saved msgs
     if (connack.sp.byte)
@@ -185,7 +187,7 @@ void server::handle_connect(pConnection& netClient, mqtt_connect& pkt)
             else
                 client->session.unregPubrec.emplace(id, 0);
 
-            message_client(client->netClient, std::move(msg));
+            client->netClient.get()->send(std::move(msg), this);
         }
         client->session.savedMsgs.clear();
     }
@@ -241,11 +243,11 @@ void server::handle_subscribe(pClient &client, mqtt_subscribe& pkt)
     tps::net::message<mqtt_header> reply;
     suback.pkt_id = pkt.pkt_id;
     suback.pack(reply);
-    message_client(client->netClient, std::move(reply));
+    client->netClient.get()->send(std::move(reply), this);
 
     // send retained msgs
     for (auto& msg: retainedMsgs)
-        message_client(client->netClient, std::move(msg));
+        client->netClient.get()->send(std::move(msg), this);
 }
 
 void server::handle_unsubscribe(pClient &client, mqtt_unsubscribe& pkt)
@@ -280,7 +282,7 @@ void server::handle_unsubscribe(pClient &client, mqtt_unsubscribe& pkt)
     tps::net::message<mqtt_header> reply;
     unsuback.pkt_id = pkt.pkt_id;
     unsuback.pack(reply);
-    message_client(client->netClient, std::move(reply));
+    client->netClient.get()->send(std::move(reply), this);
 }
 
 void server::publish_msg(mqtt_publish& pkt)
@@ -332,7 +334,6 @@ void server::publish_msg(mqtt_publish& pkt)
             // max QoS level specified in SUBSCRIBE packet
             auto qos = std::min(sub.second.second, pkt.header.bits.qos);
 
-            // avoiding one extra copy inside message_client
             // publish one of the early created versions depending on QoS
             auto temp = (qos == AT_MOST_ONCE) ? pubmsgQoS0 : pubmsgQoS12;
             temp.hdr.byte.bits.qos = qos;
@@ -344,7 +345,7 @@ void server::publish_msg(mqtt_publish& pkt)
                     subClient.session.unregPuback.insert(pkt.pkt_id);
                 else if (qos == EXACTLY_ONCE)
                     subClient.session.unregPubrec.emplace(uint16_t(pkt.pkt_id), 0);
-                message_client(subClient.netClient, std::move(temp));
+                subClient.netClient.get()->send(std::move(temp), this);
             }
             else
             {
@@ -391,18 +392,24 @@ void server::handle_publish(pClient &client, mqtt_publish& pkt)
 
     tps::net::message<mqtt_header> reply;
     ack.pack(reply);
-    message_client(client->netClient, std::move(reply));
+    client->netClient.get()->send(std::move(reply), this);
 }
 
 void server::disconnect(pClient &client, uint8_t flags, uint8_t manualControl)
 {
-    if (flags & DISCONNECT)
-        client->netClient->disconnect();
+    mqtt_publish will;
+    bool pubWill = flags & PUBLISH_WILL && client->will;
 
-    if (flags & PUBLISH_WILL && client->will)
-        publish_msg(*client->will);
+    if (flags & DISCONNECT)
+        client->netClient.get()->disconnect(this);
+
+    if (pubWill)
+        will = std::move(*client->will);
 
     m_core.delete_client(client, manualControl);
+
+    if (pubWill)
+        publish_msg(will);
 }
 
 void server::handle_puback(pClient &client, mqtt_puback& pkt)
@@ -412,7 +419,7 @@ void server::handle_puback(pClient &client, mqtt_puback& pkt)
         client->session.unregPuback.erase(itpuback);
 }
 
-void server::handle_pubrec(pClient &client, mqtt_pubrec& pkt)
+void server::handle_pubrec(pClient& client, mqtt_pubrec& pkt)
 {
     auto itpubrec = client->session.unregPubrec.find(pkt.pkt_id);
     if (itpubrec != client->session.unregPubrec.end())
@@ -424,7 +431,7 @@ void server::handle_pubrec(pClient &client, mqtt_pubrec& pkt)
         pubrel.header.bits.dup = itpubrec->second++;
         pubrel.pkt_id = pkt.pkt_id;
         pubrel.pack(msg);
-        message_client(client->netClient, std::move(msg));
+        client->netClient.get()->send(std::move(msg), this);
     }
 }
 
@@ -440,7 +447,7 @@ void server::handle_pubrel(pClient& client, mqtt_pubrel& pkt)
         pubcomp.header.bits.dup = itpubrel->second++;
         pubcomp.pkt_id = pkt.pkt_id;
         pubcomp.pack(msg);
-        message_client(client->netClient, std::move(msg));
+        client->netClient.get()->send(std::move(msg), this);
     }
 }
 
@@ -460,6 +467,6 @@ void server::handle_pingreq(pClient &client)
     tps::net::message<mqtt_header> reply;
 
     pingresp.pack(reply);
-    message_client(client->netClient, std::move(reply));
+    client->netClient.get()->send(std::move(reply), this);
 }
 

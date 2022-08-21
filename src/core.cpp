@@ -1,8 +1,8 @@
 #include "core.h"
 #include "NetCommon/net_message.h"
 
-std::optional<std::reference_wrapper<pClient>> core_t::find_client(const std::variant<pConnection,
-                                                                                      std::reference_wrapper<std::string>>& key)
+std::optional<std::reference_wrapper<pClient>> core_t::find_client(
+        const std::variant<pConnection, std::reference_wrapper<std::string>>& key)
 {
     if (auto netClient = std::get_if<pConnection>(&key))
     {
@@ -20,20 +20,24 @@ std::optional<std::reference_wrapper<pClient>> core_t::find_client(const std::va
     return std::nullopt;
 }
 
-pClient& core_t::add_new_client(std::string& clientID, pConnection& netClient)
+pClient& core_t::add_new_client(std::string&& clientID, pConnection&& netClient)
 {
-    auto newClient = std::make_shared<client_t>(netClient);
-    newClient->clientID = clientID;
+    auto newClient = std::make_shared<client_t>(clientID, netClient);
 
     clientsIDs.emplace(std::move(clientID), newClient);
-    auto res = clients.emplace(netClient, std::move(newClient));
+    auto res = clients.emplace(std::move(netClient), std::move(newClient));
+    // store reference to the key inside value
+    res.first->second->netClient = res.first->first;
+
     return res.first->second;
 }
 
-pClient& core_t::restore_client(pClient& existingClient, pConnection& netClient)
+pClient& core_t::restore_client(pClient& existingClient, pConnection&& netClient)
 {
-    existingClient->netClient = netClient;
-    auto res = clients.emplace(netClient, std::move(existingClient));
+    auto res = clients.emplace(std::move(netClient), existingClient);
+    // store reference to the key inside value
+    existingClient->netClient = res.first->first;
+
     return res.first->second;
 }
 
@@ -44,6 +48,7 @@ void core_t::delete_client(pClient& client, uint8_t manualControl)
         sessionPresent = (manualControl == FULL_DELETION) ? false : true;
 
     if (sessionPresent)
+        // switch to inactive state
         client->active = false;
     else
     {
@@ -59,16 +64,10 @@ void core_t::delete_client(pClient& client, uint8_t manualControl)
     client->username.reset();
     client->password.reset();
 
-    auto it = clients.find(client->netClient);
-    if (it != clients.end())
-    {
-        clients.erase(client->netClient);
-        std::cout << "CORE CONNECTION DELETE:" << client->netClient.use_count() << "\n";
-        client->netClient.reset();
-    }
+    clients.erase(client->netClient.get());
 }
 
-void topic::sub(std::shared_ptr<client>& client, uint8_t qos)
+void topic::sub(pClient& client, uint8_t qos)
 {
     // if client is already subscribed - update it's qos [MQTT-3.8.4-3]
     if (auto it = subscribers.find(client->clientID); it != subscribers.end())
@@ -83,7 +82,7 @@ void topic::sub(std::shared_ptr<client>& client, uint8_t qos)
     }
 }
 
-bool topic::unsub(std::shared_ptr<client>& client, bool deleteRecordFromClient)
+bool topic::unsub(pClient& client, bool deleteRecordFromClient)
 {
     // find the client
     if (auto it = subscribers.find(client->clientID); it != subscribers.end())
@@ -91,10 +90,10 @@ bool topic::unsub(std::shared_ptr<client>& client, bool deleteRecordFromClient)
         // delete this topic from client's subscriptions
         if (deleteRecordFromClient)
         {
-            auto& unsubClientSubscriptions = it->second.first.session.subscriptions;
-            auto it2 = unsubClientSubscriptions.find(name);
-            if (it2 != unsubClientSubscriptions.end())
-                unsubClientSubscriptions.erase(it2);
+            auto& clientSubscriptions = it->second.first.session.subscriptions;
+            auto it2 = clientSubscriptions.find(name);
+            if (it2 != clientSubscriptions.end())
+                clientSubscriptions.erase(it2);
         }
 
         // delete client record

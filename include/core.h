@@ -10,8 +10,8 @@
 #include "trie.h"
 #include "mqtt.h"
 
-typedef struct topic topic_t;
 typedef struct core core_t;
+typedef struct topic topic_t;
 typedef struct client client_t;
 
 namespace tps::net {template <typename T> class connection;}
@@ -21,6 +21,7 @@ using pConnection = std::shared_ptr<tps::net::connection<mqtt_header>>;
 
 struct session
 {
+    // if cleanSession == 0 store all data from this struct until the client with same clientID arrives
     bool cleanSession;
 
     // key - topic name, value - ref to topic struct
@@ -39,13 +40,16 @@ struct session
 
 typedef struct client
 {
-    client(pConnection _netClient): netClient(_netClient){}
+    client(const std::string& _clientID, pConnection& _netClient): clientID(_clientID), netClient(_netClient){}
     ~client() {std::cout << "[!]CLIENT DELETED:" << clientID << "\n";}
+
+    std::string clientID;
 
     // if client connected with clean session == 0, then, after disconnection,
     // information about client(session) is not getting deleted, instead we set active = false
+    // inactive state means that client will save all msgs, with qos == 1 & 2, which will be
+    // published on the topics to which client subscribed while it was active
     bool active;
-    std::string clientID;
     struct session session;
 
     std::optional<mqtt_publish> will;
@@ -55,7 +59,7 @@ typedef struct client
 
     uint16_t keepalive;
 
-    pConnection netClient;
+    std::reference_wrapper<const pConnection> netClient;
 }client_t;
 
 typedef struct topic
@@ -63,8 +67,8 @@ typedef struct topic
     topic(const std::string& _name): name(_name) {}
     ~topic() {std::cout << "[!]TOPIC DELETED:" << name << "\n";}
 
-    void sub  (std::shared_ptr<client>& client, uint8_t qos);
-    bool unsub(std::shared_ptr<client>& client, bool deleteRecordFromClient);
+    void sub  (pClient& client, uint8_t qos);
+    bool unsub(pClient& client, bool deleteRecordFromClient);
 
     std::string name;
 
@@ -77,17 +81,18 @@ typedef struct topic
 }topic_t;
 
 // manages the lifetime of client_t and topic_t objects
-// provides means for client and topic creation, search and deletion
+// provides means for client creation, search and deletion
 typedef struct core
 {
 public:
     trie<topic_t> topics;
 
+    // client struct can be found either by clientID or client's corresponding connection object
     std::optional<std::reference_wrapper<pClient>> find_client(
         const std::variant<pConnection, std::reference_wrapper<std::string>>& key);
 
-    pClient& add_new_client  (std::string& clientID,   pConnection& netClient);
-    pClient& restore_client  (pClient& existingClient, pConnection& netClient);
+    pClient& add_new_client  (std::string &&clientID,  pConnection&& netClient);
+    pClient& restore_client  (pClient& existingClient, pConnection&& netClient);
 
     // usually deletion type depends on client::session::cleanSession param
     // but in some special cases caller needs to specify explicitly

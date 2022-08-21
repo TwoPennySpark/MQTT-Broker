@@ -86,45 +86,18 @@ namespace tps
             }
 
             template <typename Type>
-            void message_client(std::shared_ptr<connection<T>> client, Type&& msg)
+            void message_client(std::shared_ptr<connection<T>>& client, Type&& msg)
             {
-//                if (client && client->is_connected())
-                {
-//                    std::cout << "[" << std::this_thread::get_id() << "]message_client BEFORE\n";
-                    client->send(std::forward<Type>(msg), this);
-//                    std::cout << "[" << std::this_thread::get_id() << "]message_client AFTER\n";
-                }
-//                else
-                {
-//                    on_client_disconnect(client);
-//                    client.reset();
-//                    m_deqConnections.erase(
-//                                std::remove(m_deqConnections.begin(), m_deqConnections.end(), client), m_deqConnections.end());
-                }
+                client->send(std::forward<Type>(msg), this);
             }
 
             void message_all_clients(const message<T>& msg, std::shared_ptr<connection<T>> pIgnoreClient = nullptr)
             {
-//                bool bInvalidClientExists = false;
-
                 for (auto& client: m_deqConnections)
                 {
-//                    if (client && client->is_connected())
-                    {
-                        if (client != pIgnoreClient)
-                            client->send(msg, this);
-                    }
-//                    else
-                    {
-//                        on_client_disconnect(client);
-//                        client.reset();
-//                        bInvalidClientExists = true;
-                    }
+                    if (client != pIgnoreClient)
+                        client->send(msg, this);
                 }
-
-//                if (bInvalidClientExists)
-//                    m_deqConnections.erase(
-//                                std::remove(m_deqConnections.begin(), m_deqConnections.end(), nullptr), m_deqConnections.end());
             }
 
             void update(size_t nMaxMessages = std::numeric_limits<size_t>::max())
@@ -137,12 +110,13 @@ namespace tps
                     auto msg = m_qMessagesIn.pop_front();
                     on_message(msg.owner, msg.msg);
                     nMessageCount++;
+                    std::cout << "UPDATE:" << msg.owner.use_count() << "\n";
                 }
             }
 
             void delete_client(std::shared_ptr<connection<T>> client)
             {
-                std::cout << "NETWORK DELETE CLIENT\n";
+                std::cout << "NETWORK DELETE CLIENT: " << client.use_count() << "\n";
                 m_deqConnections.erase(
                             std::remove(m_deqConnections.begin(), m_deqConnections.end(), client), m_deqConnections.end());
             }

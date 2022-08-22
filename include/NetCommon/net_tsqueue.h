@@ -68,9 +68,7 @@ namespace tps
             T pop_front()
             {
                 const std::lock_guard<std::mutex> lock(muxQueue);
-//                std::cout << "[" << std::this_thread::get_id() << "]pop_front BEFORE\n";
                 auto t = std::move(deqQueue.front());
-//                std::cout << "[" << std::this_thread::get_id() << "]pop_front AFTER\n";
                 deqQueue.pop_front();
                 return t;
             }

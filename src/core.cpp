@@ -20,8 +20,33 @@ std::optional<std::reference_wrapper<pClient>> core_t::find_client(
     return std::nullopt;
 }
 
+std::string generate_random_client_id()
+{
+    auto randchar = []() -> char
+    {
+        const char charset[] =
+        "0123456789"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz";
+        const size_t max_index = (sizeof(charset) - 1);
+        return charset[rand() % max_index];
+    };
+
+    std::string str(MAX_CLIENT_ID_LEN, 0);
+    std::generate_n(str.begin(), MAX_CLIENT_ID_LEN, randchar);
+
+    return str;
+}
+
 pClient& core_t::add_new_client(std::string&& clientID, pConnection&& netClient)
 {
+    if (!clientID.size()) // [MQTT-3.1.3-6]
+    {
+        do {clientID = generate_random_client_id();}
+        while (clientsIDs.find(clientID) != clientsIDs.end());
+        std::cout << "GENERATED CLIENT ID:" << clientID << "\n";
+    }
+
     auto newClient = std::make_shared<client_t>(clientID, netClient);
 
     clientsIDs.emplace(std::move(clientID), newClient);

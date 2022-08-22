@@ -73,7 +73,6 @@ namespace tps
                 {
                     if (m_socket.is_open())
                     {
-                        sleep(1); //
                         m_socket.shutdown(asio::ip::tcp::socket::shutdown_both);
                         m_socket.close();
                         server->delete_client(this->shared_from_this());
@@ -93,8 +92,8 @@ namespace tps
 
             void set_timer(uint32_t mls)
             {
-                m_timeoutMls = mls;
-                m_timer = boost::asio::deadline_timer(m_asioContext, boost::posix_time::millisec(m_timeoutMls.value()));
+                m_timer = std::make_pair<asio::deadline_timer, uint32_t>
+                        (asio::deadline_timer(m_asioContext, posix_time::millisec(mls)), uint32_t(mls));
             }
 
             void shutdown_cleanup(server_interface<T>* server)
@@ -149,7 +148,11 @@ namespace tps
                         if (++lenIndex < sizeof(m_msgTempIn.hdr.size))
                             return 1;
                         else
-                            return 0; //
+                        {
+                            // return imposible size to signal an error
+                            m_msgTempIn.hdr.size = std::numeric_limits<decltype(m_msgTempIn.hdr.size)>::max();
+                            return 0;
+                        }
                     }
 
                     m_msgTempIn.hdr.size = len;
@@ -172,7 +175,7 @@ namespace tps
             void read_header(server_interface<T>* server)
             {
                 if (m_timer)
-                    m_timer->async_wait([this](const std::error_code& ec)
+                    m_timer->first.async_wait([this](const std::error_code& ec)
                     {
                         if (!ec)
                             m_socket.cancel();
@@ -181,10 +184,12 @@ namespace tps
                 asio::async_read(m_socket, asio::buffer(&m_msgTempIn.hdr, sizeof(m_msgTempIn.hdr)+1), decode_len(m_msgTempIn),
                     [this, server](const std::error_code& ec, std::size_t)
                     {
-                        if (!ec)
+                        bool bValidRemainingField = (m_msgTempIn.hdr.size !=
+                            std::numeric_limits<decltype(m_msgTempIn.hdr.size)>::max());
+                        if (!ec && bValidRemainingField)
                         {
                             if (m_timer)
-                                m_timer->expires_from_now(boost::posix_time::millisec(m_timeoutMls.value()));
+                                m_timer->first.expires_from_now(boost::posix_time::millisec(m_timer->second));
 
                             if (m_msgTempIn.hdr.size > 0)
                             {
@@ -199,7 +204,8 @@ namespace tps
                         }
                         else
                         {
-                            std::cout << "[" << m_id << "] Read Header Fail: " << ec.message() << "\n";
+                            std::cout << "[" << m_id << "] Read First Header Fail: " <<
+                                    (bValidRemainingField ? ec.message() : "Invalid remaining length") << "\n";
                             shutdown_cleanup(server);
                         }
                     });
@@ -290,7 +296,9 @@ namespace tps
                 asio::async_read(m_socket, asio::buffer(&m_msgTempIn.hdr, sizeof(m_msgTempIn.hdr)+1), decode_len(m_msgTempIn),
                     [this, server](const std::error_code& ec, std::size_t)
                     {
-                        if (!ec)
+                        bool bValidRemainingField = (m_msgTempIn.hdr.size !=
+                                std::numeric_limits<decltype(m_msgTempIn.hdr.size)>::max());
+                        if (!ec && bValidRemainingField)
                         {
                             if (m_msgTempIn.hdr.size > 0)
                             {
@@ -306,6 +314,7 @@ namespace tps
                                 else
                                 {
                                     std::cout << "[" << m_id << "] Invalid First Msg Received\n";
+                                    m_socket.shutdown(asio::ip::tcp::socket::shutdown_both);
                                     m_socket.close();
                                     server->delete_client(this->shared_from_this());
                                 }
@@ -313,7 +322,9 @@ namespace tps
                         }
                         else
                         {
-                            std::cout << "[" << m_id << "] Read First Header Fail: " << ec.message() << "\n";
+                            std::cout << "[" << m_id << "] Read First Header Fail: " <<
+                                    (bValidRemainingField ? ec.message() : "Invalid remaining length") << "\n";
+                            m_socket.shutdown(asio::ip::tcp::socket::shutdown_both);
                             m_socket.close();
                             server->delete_client(this->shared_from_this());
                         }
@@ -335,6 +346,7 @@ namespace tps
                             else
                             {
                                 std::cout << "[" << m_id << "] Invalid First Msg Received\n";
+                                m_socket.shutdown(asio::ip::tcp::socket::shutdown_both);
                                 m_socket.close();
                                 server->delete_client(this->shared_from_this());
                             }
@@ -342,6 +354,7 @@ namespace tps
                         else
                         {
                             std::cout << "[" << m_id << "] Read First Body Fail\n";
+                            m_socket.shutdown(asio::ip::tcp::socket::shutdown_both);
                             m_socket.close();
                             server->delete_client(this->shared_from_this());
                         }
@@ -363,8 +376,7 @@ namespace tps
 
             uint32_t m_id = 0;
 
-            std::optional<boost::asio::deadline_timer> m_timer;
-            std::optional<uint32_t> m_timeoutMls;
+            std::optional<std::pair<asio::deadline_timer, uint32_t>> m_timer;
         };
     }
 }

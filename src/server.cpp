@@ -35,6 +35,8 @@ bool server::on_first_message(pConnection netClient, tps::net::message<mqtt_head
 void server::on_message(pConnection netClient, tps::net::message<mqtt_header>& msg)
 {
     auto newPkt = mqtt_packet::create(msg);
+    if (!newPkt)
+        return;
 
     auto type = packet_type(newPkt->header.bits.type);
     if (type == packet_type::CONNECT)
@@ -106,8 +108,21 @@ void server::handle_connect(pConnection& netClient, mqtt_connect& pkt)
     // points either to an already existing record with same client ID or
     // to a newly created client
     pClient client;
+
     mqtt_connack connack;
     connack.sp.byte = 0;
+    connack.rc = 0;
+
+    if (pkt.payload.protocolLevel != 4)
+    {
+        connack.rc = 1; // [MQTT-3.1.2-2]
+        goto reply;
+    }
+    if (!pkt.vhdr.bits.cleanSession && !pkt.payload.client_id.size())
+    {
+        connack.rc = 2; // [MQTT-3.1.3-8]
+        goto reply;
+    }
 
     // check if client with same client ID already exists
     if (auto res = m_core.find_client(pkt.payload.client_id))
@@ -169,13 +184,19 @@ void server::handle_connect(pConnection& netClient, mqtt_connect& pkt)
     if (pkt.vhdr.bits.password)
         client->password = std::move(pkt.payload.password);
     client->keepalive = pkt.payload.keepalive;
-//    client->netClient = std::move(netClient);
 
+reply:
     // send CONNACK response
     tps::net::message<mqtt_header> reply;
-    connack.rc = 0;
     connack.pack(reply);
     client->netClient.get()->send(std::move(reply), this);
+
+    if (connack.rc)
+    {
+        // [MQTT-3.2.2-4], [MQTT-3.2.2-5]
+        netClient->disconnect(this);
+        return;
+    }
 
     // if client restores session send all saved msgs
     if (connack.sp.byte)
@@ -387,7 +408,8 @@ void server::handle_publish(pClient &client, mqtt_publish& pkt)
     {
         // send pubrec again
         ack.header.byte = PUBREC_BYTE;
-        ack.header.bits.dup = ++itpubrel->second;
+        ack.header.bits.dup = 1;
+        itpubrel->second = 1;
     }
 
     tps::net::message<mqtt_header> reply;
@@ -428,7 +450,8 @@ void server::handle_pubrec(pClient& client, mqtt_pubrec& pkt)
 
         tps::net::message<mqtt_header> msg;
         mqtt_pubrel pubrel(PUBREL_BYTE);
-        pubrel.header.bits.dup = itpubrec->second++;
+        pubrel.header.bits.dup = itpubrec->second;
+        itpubrec->second = 1;
         pubrel.pkt_id = pkt.pkt_id;
         pubrel.pack(msg);
         client->netClient.get()->send(std::move(msg), this);
@@ -440,11 +463,12 @@ void server::handle_pubrel(pClient& client, mqtt_pubrel& pkt)
     auto itpubrel = client->session.unregPubrel.find(pkt.pkt_id);
     if (itpubrel != client->session.unregPubrel.end())
     {
-        client->session.unregPubrel.erase(itpubrel);
+//        client->session.unregPubrel.erase(itpubrel);
 
         tps::net::message<mqtt_header> msg;
         mqtt_pubcomp pubcomp(PUBCOMP_BYTE);
-        pubcomp.header.bits.dup = itpubrel->second++;
+        pubcomp.header.bits.dup = itpubrel->second;
+        itpubrel->second = 1;
         pubcomp.pkt_id = pkt.pkt_id;
         pubcomp.pack(msg);
         client->netClient.get()->send(std::move(msg), this);

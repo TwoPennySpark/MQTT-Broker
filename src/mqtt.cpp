@@ -182,7 +182,15 @@ std::unique_ptr<mqtt_packet> mqtt_packet::create(tps::net::message<mqtt_header>&
             ret = create<mqtt_packet>(byte);
             break;
     }
-    ret->unpack(msg);
+
+    try {
+        ret->unpack(msg);
+    } catch (...) {
+        ret = nullptr;
+    }
+
+    if (msg.data_left_to_pop())
+        ret = nullptr;
 
     return ret;
 }
@@ -201,11 +209,14 @@ void mqtt_connect::unpack(tps::net::message<mqtt_header>& msg)
     std::string protocolName;
     protocolName.resize(protocolLen);
     msg >> protocolName;
+    if (protocolName != "MQTT")  // [MQTT-3.1.2-1]
+        throw std::runtime_error("Invalid protocol name");
 
-    uint8_t protocolLevel = 0;
-    msg >> protocolLevel;
+    msg >> payload.protocolLevel;
 
     msg >> vhdr.byte;
+    if (vhdr.bits.reserved) // [MQTT-3.1.2-3]
+        throw std::runtime_error("Reserved bit must be zero");
 
     msg >> payload.keepalive;
     payload.keepalive = byteswap16(payload.keepalive);
@@ -213,6 +224,8 @@ void mqtt_connect::unpack(tps::net::message<mqtt_header>& msg)
     uint16_t clientIDLength = 0;
     msg >> clientIDLength;
     clientIDLength = byteswap16(clientIDLength);
+    if (clientIDLength > MAX_CLIENT_ID_LEN)  // [MQTT-3.1.3-5]
+        throw std::runtime_error("Client ID len must be less than 24 bytes");
 
     payload.client_id.resize(clientIDLength);
     msg >> payload.client_id;
@@ -231,6 +244,11 @@ void mqtt_connect::unpack(tps::net::message<mqtt_header>& msg)
         payload.will_message.resize(willMsgLen);
         msg >> payload.will_message;
     }
+    else if (vhdr.bits.will_qos || vhdr.bits.will_retain) // [MQTT-3.1.2-13], [MQTT-3.1.2-15]
+        throw std::runtime_error("If the will flag == 0, then the will qos and retain must be == 0");
+
+    if (vhdr.bits.will_qos > EXACTLY_ONCE)
+        throw std::runtime_error("the value of qos must not be == 3");
 
     if (this->vhdr.bits.username)
     {
@@ -243,6 +261,9 @@ void mqtt_connect::unpack(tps::net::message<mqtt_header>& msg)
 
     if (this->vhdr.bits.password)
     {
+        if (!this->vhdr.bits.username)
+            throw std::runtime_error("if the username flag == 0, the password flag must be == 0");
+
         uint16_t passwordLen = 0;
         msg >> passwordLen;
         passwordLen = byteswap16(passwordLen);

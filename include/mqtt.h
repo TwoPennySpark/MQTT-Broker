@@ -38,7 +38,7 @@ enum class packet_type: uint8_t
     ERROR       = 15
 };
 
-enum qos_level { AT_MOST_ONCE, AT_LEAST_ONCE, EXACTLY_ONCE };
+enum qos_level {AT_MOST_ONCE, AT_LEAST_ONCE, EXACTLY_ONCE};
 
 namespace tps::net {template <typename T> struct message;}
 
@@ -85,6 +85,8 @@ struct mqtt_packet
     friend std::ostream& operator<< (std::ostream& os, const mqtt_packet& pkt);
 };
 
+const uint8_t MAX_CLIENT_ID_LEN = 23;
+
 struct mqtt_connect: public mqtt_packet
 {
     mqtt_connect() = default;
@@ -111,6 +113,7 @@ struct mqtt_connect: public mqtt_packet
     struct payload
     {
         payload() = default;
+        uint8_t protocolLevel;
         uint16_t keepalive;
         std::string client_id;
         std::string username;

@@ -15,9 +15,9 @@ namespace tps
 
             message_header(message_header& _hdr): byte(_hdr.byte), size(_hdr.size) {std::cout << "COPYC\n";}
             message_header(const message_header& _hdr): byte(_hdr.byte), size(_hdr.size) {std::cout << "[" << std::this_thread::get_id() << "]=COPYCC\n";}
-            message_header& operator=(const message_header& _hdr) {std::cout << "COPYA\n";byte = _hdr.byte; size = _hdr.size; return *this;}
+            message_header& operator=(const message_header& _hdr) {byte = _hdr.byte; size = _hdr.size; return *this;}
 
-            message_header(message_header&& _hdr): byte(_hdr.byte), size(_hdr.size) {/*std::cout << "[" << std::this_thread::get_id() << "]=MOVEC\n";*/_hdr.byte = 0; _hdr.size = 0;}
+            message_header(message_header&& _hdr): byte(_hdr.byte), size(_hdr.size) {_hdr.byte = 0; _hdr.size = 0;}
 
             T byte;
             uint32_t size = 0;
@@ -81,6 +81,9 @@ namespace tps
             {
                 static_assert(std::is_standard_layout<DataType>::value, "Data is too complex to be poped");
 
+                if (body.size() - m_start < sizeof(data))
+                    throw std::runtime_error("Request to pop an amount of data that exceeds the size of the message");
+
                 std::memcpy(&data, &body[m_start], sizeof(data));
 
                 m_start += sizeof(data);
@@ -93,9 +96,8 @@ namespace tps
 
             message& operator>>(std::string& data)
             {
-                // Request to pop an amount of data that exceeds the size of the message
                 if (body.size() - m_start < data.size())
-                    return *this;
+                    throw std::runtime_error("Request to pop an amount of data that exceeds the size of the message");
 
                 std::memcpy(&data[0], &body[m_start], data.size());
 
@@ -109,9 +111,8 @@ namespace tps
 
             message& operator>>(std::vector<uint8_t>& data)
             {
-                // Request to pop an amount of data that exceeds the size of the message
                 if (body.size() - m_start < data.size())
-                    return *this;
+                    throw std::runtime_error("Request to pop an amount of data that exceeds the size of the message");
 
                 std::memcpy(data.data(), &body[m_start], data.size());
 
@@ -121,6 +122,11 @@ namespace tps
                     m_start = m_end = 0;
 
                 return *this;
+            }
+
+            uint32_t data_left_to_pop()
+            {
+                return body.size() - m_start;
             }
 
         private:

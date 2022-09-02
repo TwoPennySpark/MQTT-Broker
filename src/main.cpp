@@ -645,16 +645,253 @@ void test_trie()
     test_trie12();
 }
 
+
+void test_idpool_gen1()
+{ // test gen filling the blank spots
+    KeyPool<uint16_t, packet_type> p;
+    auto type = packet_type::PUBACK;
+
+    for (int i = 0; i < 10; i++)
+        p.generate_key(type);
+
+    // {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+
+    p.unregister_key(3);
+    p.unregister_key(6);
+    p.unregister_key(9);
+
+    // {0, 1, 2}, {4, 5}, {7, 8}
+
+    p.generate_key(type);
+    p.generate_key(type);
+    p.generate_key(type);
+
+    // {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+
+    auto it = p.chunks.begin();
+    assert(p.chunks.size() == 1);
+    assert(it->start == 0 && it->end == 9 && it->values.size() == 10);
+    for (uint16_t i = 0; i < 10; i++)
+        assert(p.find(i).value() == type);
+}
+
+void test_idpool_gen2()
+{ // test gen for case when all ids are taken
+    KeyPool<uint16_t, packet_type> p; auto type = packet_type::PUBACK;
+
+    for (uint16_t i = 0; i < 65535; i++)
+        p.generate_key(type);
+    p.generate_key(type);
+
+    // {0, ... , 65535}
+
+    try {
+        p.generate_key(type);
+    } catch (...) {
+        for (uint16_t i = 0; i < 65535; i++)
+            assert(p.find(i).value() == type);
+        return;
+    }
+    assert(1==0);
+}
+
+void test_idpool_reg1()
+{ // test reg filling the blank spots with different type
+    KeyPool<uint16_t, packet_type> p;
+    auto type  = packet_type::PUBACK;
+    auto type2 = packet_type::PUBREC;
+
+    for (uint16_t i = 0; i < 3; i++)
+        p.register_key(i, type);
+    p.register_key(3, type2);
+
+    for (uint16_t i = 4; i < 6; i++)
+        p.register_key(i, type);
+    p.register_key(6, type2);
+
+    for (uint16_t i = 7; i < 9; i++)
+        p.register_key(i, type);
+    p.register_key(9, type2);
+
+    // {0, 1, 2, 3(2), 4, 5, 6(2), 7, 8, 9(2)}
+
+    assert(p.unregister_key(3));
+    assert(p.unregister_key(6));
+    assert(p.unregister_key(9));
+
+    // {0, 1, 2}, {4, 5}, {7, 8}
+
+    p.register_key(3, type);
+    p.register_key(6, type);
+    p.register_key(9, type);
+
+    // {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+
+    auto it = p.chunks.begin();
+    assert(p.chunks.size() == 1);
+    assert(it->start == 0 && it->end == 9 && it->values.size() == 10);
+    for (uint16_t i = 0; i < 10; i++)
+        assert(p.find(i).value() == type);
+}
+
+void test_idpool_reg2()
+{ // test reg on existing elements
+    KeyPool<uint16_t, packet_type> p;
+    auto type  = packet_type::PUBACK;
+    auto type2 = packet_type::PUBREC;
+
+    for (uint16_t i = 0; i < 10; i++)
+        assert(p.register_key(i, type));
+
+    for (uint16_t i = 0; i < 10; i++)
+        assert(!p.register_key(i, type2));
+
+    auto it = p.chunks.begin();
+    assert(p.chunks.size() == 1);
+    assert(it->start == 0 && it->end == 9 && it->values.size() == 10);
+    for (uint16_t i = 0; i < 10; i++)
+        assert(p.find(i).value() == type);
+}
+
+void test_idpool_reg3()
+{ // test reg on bigger elements
+    KeyPool<uint16_t, packet_type> p;
+    auto type = packet_type::PUBACK;
+
+    p.register_key(100, type);
+    p.register_key(1000, type);
+
+    auto it = p.chunks.begin();
+    assert(p.chunks.size() == 2);
+    assert(it->start == 100 && it->end == 100 && it->values.size() == 1);
+    it++;
+    assert(it->start == 1000 && it->end == 1000 && it->values.size() == 1);
+    assert(p.find(100).value() == type);
+    assert(p.find(1000).value() == type);
+}
+
+void test_idpool_unreg1()
+{ // test unreg on empty
+    KeyPool<uint16_t, packet_type> p;
+    auto type = packet_type::PUBACK;
+
+    assert(p.unregister_key(0) == false);
+    assert(p.unregister_key(-1000) == false);
+    assert(p.unregister_key(65535) == false);
+    assert(p.chunks.size() == 0);
+}
+
+void test_idpool_unreg2()
+{ // test unreg on boundary elements
+    KeyPool<uint16_t, packet_type> p; auto type = packet_type::PUBACK;
+
+    p.register_key(2, type);p.register_key(3, type);p.register_key(4, type);
+    p.register_key(7, type);p.register_key(8, type);p.register_key(9, type);
+
+    // {2,3,4}, {7,8,9}
+
+    p.unregister_key(2);
+    p.unregister_key(4);
+    p.unregister_key(7);
+    p.unregister_key(9);
+
+    // {3}, {8}
+
+    assert(p.chunks.size() == 2);
+    auto it = p.chunks.begin();
+    assert(it->start == 3 && it->end == 3 && it->values.size() == 1);
+    it++;
+    assert(it->start == 8 && it->end == 8 && it->values.size() == 1);
+    assert(p.find(3).value() == type);
+    assert(p.find(8).value() == type);
+}
+
+void test_idpool_unreg3()
+{ // test unreg on mid elements
+    KeyPool<uint16_t, packet_type> p; auto type = packet_type::PUBACK;
+
+    p.register_key(2, type); p.register_key(3, type); p.register_key(4, type); p.register_key(5, type);
+    p.register_key(7, type); p.register_key(8, type); p.register_key(9, type); p.register_key(10, type);
+
+    // {2,3,4,5}, {7,8,9,10}
+
+    p.unregister_key(3);p.unregister_key(4);
+    p.unregister_key(8);p.unregister_key(9);
+
+    // {2}, {5}, {7}, {10}
+
+    assert(p.chunks.size() == 4);
+    auto it = p.chunks.begin();
+    assert(it->start == 2 && it->end == 2 && it->values.size() == 1);
+    it++;
+    assert(it->start == 5 && it->end == 5 && it->values.size() == 1);
+    it++;
+    assert(it->start == 7 && it->end == 7 && it->values.size() == 1);
+    it++;
+    assert(it->start == 10 && it->end == 10 && it->values.size() == 1);
+    assert(p.find(2).value() == type);
+    assert(p.find(5).value() == type);
+    assert(p.find(7).value() == type);
+    assert(p.find(10).value() == type);
+}
+
+void test_idpool_unreg4()
+{ // test unreg on mid and border elements
+    KeyPool<uint16_t, packet_type> p; auto type = packet_type::PUBACK;
+    auto type2 = packet_type::PUBREC;
+
+    p.register_key(2, type);p.register_key(3, type2);p.register_key(4, type2);p.register_key(5, type);
+    p.register_key(7, type);p.register_key(8, type);p.register_key(9, type);p.register_key(10, type2);
+
+    // {2,3,4,5}, {7,8,9,10}
+
+    assert(p.unregister_key(4));
+    assert(p.unregister_key(3));
+    assert(p.unregister_key(2));
+
+    // {5}, {7,8,9,10}
+
+    assert(p.unregister_key(9));
+    assert(p.unregister_key(10));
+    assert(p.unregister_key(8));
+
+    // {5}, {7}
+
+    assert(p.chunks.size() == 2);
+    auto it = p.chunks.begin();
+    assert(it->start == 5 && it->end == 5 && it->values.size() == 1);
+    it++;
+    assert(it->start == 7 && it->end == 7 && it->values.size() == 1);
+    assert(p.find(5).value() == type);
+    assert(p.find(7).value() == type);
+}
+
+void test_idpool()
+{
+    test_idpool_gen1();
+    test_idpool_gen2();
+    test_idpool_reg1();
+    test_idpool_reg2();
+    test_idpool_reg3();
+    test_idpool_unreg1();
+    test_idpool_unreg2();
+    test_idpool_unreg3();
+    test_idpool_unreg4();
+}
+
 void test()
 {
-    test_simple_pack_unpack();
-    test_mqtt_encode_decode_length();
-    test_pack_unpack();
-    test_trie();
+//    test_simple_pack_unpack();
+//    test_mqtt_encode_decode_length();
+//    test_pack_unpack();
+//    test_trie();
+
+    test_idpool();
 }
 
 int main()
 {
+//    test();
     std::cout << "[" << std::this_thread::get_id() << "]MAIN THREAD\n";
 
     server broker(5000);

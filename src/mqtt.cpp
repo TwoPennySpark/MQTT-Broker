@@ -195,12 +195,12 @@ std::unique_ptr<mqtt_packet> mqtt_packet::create(tps::net::message<mqtt_header>&
     return ret;
 }
 
-void mqtt_packet::unpack(tps::net::message<mqtt_header>& msg)
+void mqtt_packet::unpack(const tps::net::message<mqtt_header> &msg)
 {
 
 }
 
-void mqtt_connect::unpack(tps::net::message<mqtt_header>& msg)
+void mqtt_connect::unpack(const tps::net::message<mqtt_header>& msg)
 {
     uint16_t protocolLen = 0;
     msg >> protocolLen;
@@ -272,7 +272,7 @@ void mqtt_connect::unpack(tps::net::message<mqtt_header>& msg)
     }
 }
 
-void mqtt_subscribe::unpack(tps::net::message<mqtt_header>& msg)
+void mqtt_subscribe::unpack(const tps::net::message<mqtt_header> &msg)
 {
     // [MQTT-3.8.1-1]
     if (msg.hdr.byte.bits.qos != 1)
@@ -312,7 +312,7 @@ void mqtt_subscribe::unpack(tps::net::message<mqtt_header>& msg)
     }
 }
 
-void mqtt_unsubscribe::unpack(tps::net::message<mqtt_header>& msg)
+void mqtt_unsubscribe::unpack(const tps::net::message<mqtt_header> &msg)
 {
     msg >> pkt_id;
     pkt_id = byteswap16(pkt_id);
@@ -336,7 +336,7 @@ void mqtt_unsubscribe::unpack(tps::net::message<mqtt_header>& msg)
     }
 }
 
-void mqtt_publish::unpack(tps::net::message<mqtt_header>& msg)
+void mqtt_publish::unpack(const tps::net::message<mqtt_header> &msg)
 {
     msg >> topiclen;
     topiclen = byteswap16(topiclen);
@@ -359,7 +359,7 @@ void mqtt_publish::unpack(tps::net::message<mqtt_header>& msg)
     msg >> payload;
 }
 
-void mqtt_suback::unpack(tps::net::message<mqtt_header>& msg)
+void mqtt_suback::unpack(const tps::net::message<mqtt_header> &msg)
 {
     msg >> pkt_id;
     pkt_id = byteswap16(pkt_id);
@@ -369,19 +369,19 @@ void mqtt_suback::unpack(tps::net::message<mqtt_header>& msg)
     msg >> rcs;
 }
 
-void mqtt_ack::unpack(tps::net::message<mqtt_header>& msg)
+void mqtt_ack::unpack(const tps::net::message<mqtt_header> &msg)
 {
     msg >> pkt_id;
     pkt_id = byteswap16(pkt_id);
 }
 
-void mqtt_packet::pack(tps::net::message<mqtt_header>& msg)
+void mqtt_packet::pack(tps::net::message<mqtt_header>& msg) const
 {
     msg.hdr.byte = header.byte;
     msg.writeHdrSize += mqtt_encode_length(msg, 0);
 }
 
-void mqtt_publish::pack(tps::net::message<mqtt_header>& msg)
+void mqtt_publish::pack(tps::net::message<mqtt_header>& msg) const
 {
     msg.hdr.byte = header.byte;
     uint32_t remainingLen = sizeof(topiclen) +
@@ -401,7 +401,7 @@ void mqtt_publish::pack(tps::net::message<mqtt_header>& msg)
     msg << payload;
 }
 
-void mqtt_connack::pack(tps::net::message<mqtt_header>& msg)
+void mqtt_connack::pack(tps::net::message<mqtt_header>& msg) const
 {
     msg.hdr.byte = header.byte;
     msg.writeHdrSize += mqtt_encode_length(msg, sizeof(sp) + sizeof(rc));
@@ -410,7 +410,7 @@ void mqtt_connack::pack(tps::net::message<mqtt_header>& msg)
     msg << rc;
 }
 
-void mqtt_suback::pack(tps::net::message<mqtt_header>& msg)
+void mqtt_suback::pack(tps::net::message<mqtt_header>& msg) const
 {
     msg.hdr.byte = header.byte;
     msg.writeHdrSize += mqtt_encode_length(msg, sizeof(pkt_id) + rcs.size());
@@ -420,7 +420,7 @@ void mqtt_suback::pack(tps::net::message<mqtt_header>& msg)
     msg << rcs;
 }
 
-void mqtt_ack::pack(tps::net::message<mqtt_header>& msg)
+void mqtt_ack::pack(tps::net::message<mqtt_header>& msg) const
 {
     msg.hdr.byte = header.byte;
     msg.writeHdrSize += mqtt_encode_length(msg, sizeof(pkt_id));

@@ -77,10 +77,16 @@ void core_t::delete_client(pClient& client, uint8_t manualControl)
         client->active = false;
     else
     {
-        // inform all topics about client unsubscription
-        for (auto& topic: client->session.subscriptions)
-            if (topic.second.unsub(client, false) && !topic.second.subscribers.size())
-                topics.erase(topic.first);
+        // delete all client's subscriptions
+        for (auto it = client->session.subscriptions.begin(); it != client->session.subscriptions.end();)
+        {
+//            std::string topicname = it->first;
+            topic_t& topic = it->second;
+            ++it;
+            unsubscribe(*client, topic);
+//            if (client->unsubscribe(topic) && !topic.subscribers.size())
+//                topics.erase(topicname);
+        }
 
         clientsIDs.erase(client->clientID);
     }
@@ -92,41 +98,64 @@ void core_t::delete_client(pClient& client, uint8_t manualControl)
     clients.erase(client->netClient.get());
 }
 
-void topic::sub(pClient& client, uint8_t qos)
+std::optional<std::reference_wrapper<topic_t>> core_t::find_topic(const std::string& topicname, bool bCreateIfNotExist)
+{
+    auto topicNode = topics.find(topicname);
+    if (topicNode && topicNode->data)
+        return *topicNode->data;
+    else if (bCreateIfNotExist)
+    {
+        //  create new topic
+        auto newTopic = std::make_shared<topic_t>(topicname);
+        topics.insert(topicname, newTopic);
+        return *newTopic;
+    }
+    return std::nullopt;
+}
+
+void core_t::subscribe(client_t& client, topic_t& topic, uint8_t qos)
 {
     // if client is already subscribed - update it's qos [MQTT-3.8.4-3]
-    if (auto it = subscribers.find(client->clientID); it != subscribers.end())
+    if (auto it = topic.subscribers.find(client.clientID);
+             it != topic.subscribers.end())
         it->second.second = qos;
     else
-    {
         // add new client to the list of subs
-        subscribers.emplace(client->clientID, subscriber(*client, qos));
+        topic.subscribers.emplace(client.clientID, topic_t::subscriber(client, qos));
 
-        // add this topic to client's subscriptions list
-        client->session.subscriptions.emplace(name, *this);
-    }
+    client.session.subscriptions.emplace(topic.name, topic);
+
 }
 
-bool topic::unsub(pClient& client, bool deleteRecordFromClient)
+void core_t::unsubscribe(client_t& client, topic_t& topic)
 {
-    // find the client
-    if (auto it = subscribers.find(client->clientID); it != subscribers.end())
-    {
-        // delete this topic from client's subscriptions
-        if (deleteRecordFromClient)
-        {
-            auto& clientSubscriptions = it->second.first.session.subscriptions;
-            auto it2 = clientSubscriptions.find(name);
-            if (it2 != clientSubscriptions.end())
-                clientSubscriptions.erase(it2);
-        }
+    client.session.subscriptions.erase(topic.name);
+    topic.subscribers.erase(client.clientID);
 
-        // delete client record
-        subscribers.erase(it);
-        return true;
-    }
-    return false;
+    // delete topic if there is no more subscribers
+    if (!topic.subscribers.size())
+        topics.erase(topic.name);
 }
+
+//void client::subscribe(topic_t &topic, uint8_t qos)
+//{
+//    // if client is already subscribed - update it's qos [MQTT-3.8.4-3]
+//    if (auto it = topic.subscribers.find(clientID); it != topic.subscribers.end())
+//        it->second.second = qos;
+//    else
+//        // add new client to the list of subs
+//        topic.subscribers.emplace(clientID, topic_t::subscriber(*this, qos));
+
+//    session.subscriptions.emplace(topic.name, topic);
+//}
+
+//bool client::unsubscribe(topic_t &topic)
+//{
+//    session.subscriptions.erase(topic.name);
+//    topic.subscribers.erase(clientID);
+
+//    return topic.subscribers.size();
+//}
 
 std::vector<std::shared_ptr<topic_t>> core_t::get_matching_topics(const std::string& topicFilter)
 {
@@ -236,3 +265,4 @@ std::vector<std::shared_ptr<topic_t>> core_t::get_matching_topics(const std::str
 
     return matches;
 }
+

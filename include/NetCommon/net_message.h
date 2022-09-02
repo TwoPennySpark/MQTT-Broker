@@ -77,7 +77,7 @@ namespace tps
 
             // POP
             template <typename DataType>
-            message& operator>>(DataType& data)
+            const message& operator>>(DataType& data) const
             {
                 static_assert(std::is_standard_layout<DataType>::value, "Data is too complex to be poped");
 
@@ -94,7 +94,7 @@ namespace tps
                 return *this;
             }
 
-            message& operator>>(std::string& data)
+            const message& operator>>(std::string& data) const
             {
                 if (body.size() - m_start < data.size())
                     throw std::runtime_error("Request to pop an amount of data that exceeds the size of the message");
@@ -109,7 +109,7 @@ namespace tps
                 return *this;
             }
 
-            message& operator>>(std::vector<uint8_t>& data)
+            const message& operator>>(std::vector<uint8_t>& data) const
             {
                 if (body.size() - m_start < data.size())
                     throw std::runtime_error("Request to pop an amount of data that exceeds the size of the message");
@@ -130,7 +130,7 @@ namespace tps
             }
 
         private:
-            uint32_t m_start = 0, m_end = 0;
+            mutable uint32_t m_start = 0, m_end = 0;
         };
 
         template <typename T>

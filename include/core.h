@@ -2,6 +2,7 @@
 #define CORE_H
 
 #include <set>
+#include <map>
 #include <unordered_map>
 #include <memory>
 #include <iostream>
@@ -9,6 +10,7 @@
 #include <boost/algorithm/string.hpp>
 #include "trie.h"
 #include "mqtt.h"
+#include "keypool.h"
 
 typedef struct core core_t;
 typedef struct topic topic_t;
@@ -27,15 +29,11 @@ struct session
     // key - topic name, value - ref to topic struct
     std::unordered_map<std::string, topic_t&> subscriptions;
 
-    std::set<uint16_t> unregPuback;
-    // first - expected pubrec pkt ID, second - dup (number of already sent pubrels using this pkt ID)
-    std::unordered_map<uint16_t, uint8_t> unregPubrec;
-    // first - expected pubrel pkt ID, second - dup (number of already sent pubcomps using this pkt ID)
-    std::unordered_map<uint16_t, uint8_t> unregPubrel;
-    std::set<uint16_t> unregPubcomp;
+    // first - expected ack pkt ID, second - expected ack type
+    KeyPool<uint16_t, packet_type> pool;
 
-    // first - msg, second - pkt ID
-    std::vector<std::pair<tps::net::message<mqtt_header>, uint16_t>> savedMsgs;
+    // messages that were published while client was inactive
+    std::vector<mqtt_publish> savedMsgs;
 };
 
 typedef struct client
@@ -67,9 +65,6 @@ typedef struct topic
     topic(const std::string& _name): name(_name) {}
     ~topic() {std::cout << "[!]TOPIC DELETED:" << name << "\n";}
 
-    void sub  (pClient& client, uint8_t qos);
-    bool unsub(pClient& client, bool deleteRecordFromClient);
-
     std::string name;
 
     std::optional<mqtt_publish> retain;
@@ -81,16 +76,14 @@ typedef struct topic
 }topic_t;
 
 // manages the lifetime of client_t and topic_t objects
-// provides means for client creation, search and deletion
+// provides means for client and topic creation, search and deletion
 typedef struct core
 {
 public:
-    trie<topic_t> topics;
-
+    // ===========CLIENTS===========
     // client struct can be found either by clientID or client's corresponding connection object
     std::optional<std::reference_wrapper<pClient>> find_client(
         const std::variant<pConnection, std::reference_wrapper<std::string>>& key);
-
     pClient& add_new_client  (std::string &&clientID,  pConnection&& netClient);
     pClient& restore_client  (pClient& existingClient, pConnection&& netClient);
 
@@ -105,12 +98,23 @@ public:
     };
     void delete_client(pClient& client, uint8_t manualControl = BASED_ON_CS_PARAM);
 
+    // ===========TOPICS===========
+    // find topic named topicname, if bCreateIfNotExist == true - create new topic if none was found
+    std::optional<std::reference_wrapper<topic_t>> find_topic(const std::string& topicname,
+                                                              bool bCreateIfNotExist = false);
+    // subscribe client to topic
+    void subscribe  (client_t& client, topic_t& topic, uint8_t qos);
+    // unsubscribe client from topic, delete topic if it has no subscribers left
+    void unsubscribe(client_t& client, topic_t& topic);
+
+    // find all topics that correspond to topicFilter string, that contains wildcards
     std::vector<std::shared_ptr<topic_t>> get_matching_topics(const std::string& topicFilter);
 
 private:
     std::unordered_map<pConnection, pClient> clients;
     std::unordered_map<std::string, pClient> clientsIDs;
 
+    trie<topic_t> topics;
 }core_t;
 
 #endif // CORE_H

@@ -28,8 +28,8 @@ bool server::on_first_message(pConnection netClient, tps::net::message<mqtt_head
         }
         return true;
     }
-    else
-        return false;
+
+    return false;
 }
 
 void server::on_message(pConnection netClient, tps::net::message<mqtt_header>& msg)
@@ -201,29 +201,29 @@ reply:
     // if client restores session send all saved msgs
     if (connack.sp.byte)
     {
-        for (auto& [msg, id]: client->session.savedMsgs)
+        for (auto& pkt : client->session.savedMsgs)
         {
-            if (msg.hdr.byte.bits.qos == AT_LEAST_ONCE)
-                client->session.unregPuback.emplace(id);
-            else
-                client->session.unregPubrec.emplace(id, 0);
+            auto ackType = (pkt.header.bits.qos == AT_LEAST_ONCE) ? packet_type::PUBACK : packet_type::PUBREC;
+            pkt.pkt_id = client->session.pool.generate_key(ackType);
 
+            tps::net::message<mqtt_header> msg;
+            pkt.pack(msg);
             client->netClient.get()->send(std::move(msg), this);
         }
         client->session.savedMsgs.clear();
     }
 }
 
-void server::handle_subscribe(pClient &client, mqtt_subscribe& pkt)
+void server::handle_subscribe(pClient& client, mqtt_subscribe& pkt)
 {
     mqtt_suback suback;
 
     std::vector<tps::net::message<mqtt_header>> retainedMsgs;
-    auto save_retained_msg = [&retainedMsgs](std::shared_ptr<topic_t>& topic, uint8_t qos)
+    auto save_retained_msg = [&retainedMsgs](topic_t& topic, uint8_t qos)
     {
         tps::net::message<mqtt_header> pubmsg;
-        topic->retain->header.bits.qos = std::min(qos, topic->retain->header.bits.qos);
-        topic->retain->pack(pubmsg);
+        topic.retain->header.bits.qos = std::min(qos, topic.retain->header.bits.qos);
+        topic.retain->pack(pubmsg);
         retainedMsgs.emplace_back(std::move(pubmsg));
     };
 
@@ -236,26 +236,17 @@ void server::handle_subscribe(pClient &client, mqtt_subscribe& pkt)
             auto matches = m_core.get_matching_topics(topicfilter);
             for (auto& topic: matches)
             {
-                topic->sub(client, qos);
+                m_core.subscribe(*client, *topic, qos);
                 if (topic->retain)
-                    save_retained_msg(topic, qos);
+                    save_retained_msg(*topic, qos);
             }
         }
         else
         {
-            std::shared_ptr<topic_t> topic;
-            auto topicNode = m_core.topics.find(topicfilter);
-            if (topicNode && topicNode->data) // if topic already exists
-                topic = topicNode->data;
-            else
-            { // create new topic
-                auto newTopic = std::make_shared<topic_t>(topicfilter);
-                m_core.topics.insert(topicfilter, newTopic);
-                topic = newTopic;
-            }
-            topic->sub(client, qos);
-            if (topic->retain)
-                save_retained_msg(topic, qos);
+            auto topic = m_core.find_topic(topicfilter, true);
+            m_core.subscribe(*client, topic->get(), qos);
+            if (topic->get().retain)
+                save_retained_msg(topic->get(), qos);
         }
         suback.rcs.push_back(qos);
     }
@@ -271,7 +262,7 @@ void server::handle_subscribe(pClient &client, mqtt_subscribe& pkt)
         client->netClient.get()->send(std::move(msg), this);
 }
 
-void server::handle_unsubscribe(pClient &client, mqtt_unsubscribe& pkt)
+void server::handle_unsubscribe(pClient& client, mqtt_unsubscribe& pkt)
 {
     for (auto& [topiclen, topicfilter]: pkt.tuples)
     {
@@ -281,20 +272,12 @@ void server::handle_unsubscribe(pClient &client, mqtt_unsubscribe& pkt)
         {
             auto matches = m_core.get_matching_topics(topicfilter);
             for (auto& topic: matches)
-                // delete topic if there is no more subscribers
-                if (topic->unsub(client, true) && !topic->subscribers.size())
-                    m_core.topics.erase(topic->name);
+                m_core.unsubscribe(*client, *topic);
         }
         else
         {
-            auto topicNode = m_core.topics.find(topicfilter);
-            if (topicNode && topicNode->data)
-            {
-                auto& topic = topicNode->data;
-                // delete topic if there is no more subscribers
-                if (topic->unsub(client, true) && !topic->subscribers.size())
-                    m_core.topics.erase(topicNode->data->name);
-            }
+            if (auto topic = m_core.find_topic(topicfilter))
+                m_core.unsubscribe(*client, topic->get());
         }
     }
 
@@ -308,151 +291,160 @@ void server::handle_unsubscribe(pClient &client, mqtt_unsubscribe& pkt)
 
 void server::publish_msg(mqtt_publish& pkt)
 {
-    auto node = m_core.topics.find(pkt.topic);
-    if (node && node->data)
+    auto topic = m_core.find_topic(pkt.topic);
+    if (!topic)
+        return;
+
+    // if retain flag set
+    if (pkt.header.bits.retain)
     {
-        auto& topic = node->data;
-
-        // if retain flag set
-        if (pkt.header.bits.retain)
+        // save new retained msg
+        if (pkt.payload.size())
         {
-            // save new retained msg
-            if (pkt.payload.size())
-            {
-                mqtt_publish retain = pkt;
-                retain.header.bits.dup = 0;
+            mqtt_publish retain = pkt;
+            retain.header.bits.dup = 0;
 
-                topic->retain = std::move(retain);
-            }
-            else
-                // if payload.size() == 0 delete existing retained msg
-                topic->retain.reset();
+            topic->get().retain = std::move(retain);
         }
+        else
+            // if payload.size() == 0 delete existing retained msg
+            topic->get().retain.reset();
 
-        // send published msg to subscribers with new header (and pkt ID if QoS > 0)
-        auto originalQoS = pkt.header.bits.qos;
-        tps::net::message<mqtt_header> pubmsgQoS0, pubmsgQoS12;
         pkt.header.bits.retain = 0; // [MQTT-3.3.1-9]
-        pkt.header.bits.dup = 0;
+    }
 
-        // create both versions of the message if qos > 0
-        // so that there is no need to call mqtt_publish::pack
-        // inside next loop for every sub
-        pkt.header.bits.qos = AT_MOST_ONCE;
-        pkt.pack(pubmsgQoS0);
-        if (originalQoS > AT_MOST_ONCE)
+    pkt.header.bits.dup = 0;
+
+    // prepare version with qos == 0 beforehand, since it doesn't need pkt ID
+    tps::net::message<mqtt_header> pubmsgQoS0;
+    pubmsgQoS0.hdr.byte.bits.qos = AT_MOST_ONCE;
+    pkt.pack(pubmsgQoS0);
+
+    auto originalPktID = pkt.pkt_id;
+
+    // send published msg to subscribers
+    for (auto& sub: topic->get().subscribers)
+    {
+        auto& subClient = sub.second.first;
+
+        // determine QoS level based on published msg QoS and client's
+        // max QoS level specified in SUBSCRIBE packet
+        auto qos = std::min(sub.second.second, pkt.header.bits.qos);
+
+        if (subClient.active)
         {
-            static uint16_t pktID = 0; //
-            pkt.pkt_id = pktID++;
-
-            pkt.header.bits.qos = originalQoS;
-            pkt.pack(pubmsgQoS12);
-        }
-
-        for (auto& sub: topic->subscribers)
-        {
-            // determine QoS level based on published msg QoS and client
-            // max QoS level specified in SUBSCRIBE packet
-            auto qos = std::min(sub.second.second, pkt.header.bits.qos);
-
-            // publish one of the early created versions depending on QoS
-            auto temp = (qos == AT_MOST_ONCE) ? pubmsgQoS0 : pubmsgQoS12;
-            temp.hdr.byte.bits.qos = qos;
-
-            auto& subClient = sub.second.first;
-            if (subClient.active)
-            {
-                if (qos == AT_LEAST_ONCE)
-                    subClient.session.unregPuback.insert(pkt.pkt_id);
-                else if (qos == EXACTLY_ONCE)
-                    subClient.session.unregPubrec.emplace(uint16_t(pkt.pkt_id), 0);
-                subClient.netClient.get()->send(std::move(temp), this);
-            }
+            tps::net::message<mqtt_header> temp;
+            if (qos == AT_MOST_ONCE)
+                temp = pubmsgQoS0;
             else
             {
-                // save msgs until session is restored
-                if (qos > AT_MOST_ONCE)
-                    subClient.session.savedMsgs.emplace_back(std::move(temp), pkt.pkt_id);
+                // assign pkt ID
+                auto ackType = (qos == AT_LEAST_ONCE) ? packet_type::PUBACK : packet_type::PUBREC;
+                pkt.pkt_id = subClient.session.pool.generate_key(ackType);
+
+                pkt.pack(temp);
+
+                temp.hdr.byte.bits.qos = qos;
+            }
+            subClient.netClient.get()->send(std::move(temp), this);
+        }
+        else
+        {
+            // save msgs until session is restored
+            if (qos > AT_MOST_ONCE)
+            {
+                subClient.session.savedMsgs.push_back(pkt);
+                subClient.session.savedMsgs.back().header.bits.qos = qos;
             }
         }
     }
+    pkt.pkt_id = originalPktID;
 }
 
-void server::handle_publish(pClient &client, mqtt_publish& pkt)
+void server::handle_publish(pClient& client, mqtt_publish& pkt)
 {
-    mqtt_ack ack;
-    ack.pkt_id = pkt.pkt_id;
+    mqtt_ack ack(PUBACK_BYTE);
 
-    // if it's not an attempt to resend qos2 msg that
-    // has already been recieved (publisher didn't get pubrec reply for some reason)
-    auto itpubrel = client->session.unregPubrel.find(pkt.pkt_id);
-    if (!(pkt.header.bits.qos == EXACTLY_ONCE && itpubrel != client->session.unregPubrel.end()))
+    // if it's an attempt to resend qos2 msg that has already been
+    // received (publisher didn't get pubrec reply for some reason) [MQTT-4.3.3-2]
+    bool bQoS2Resend = false;
+    if (pkt.header.bits.qos == EXACTLY_ONCE)
+    {
+        auto pubrel = client->session.pool.find(pkt.pkt_id);
+        if (pubrel && pubrel.value().get() == packet_type::PUBREL)
+        {
+            // send pubrec again
+            ack.header.byte = PUBREC_BYTE;
+            ack.header.bits.dup = 1;
+
+            bQoS2Resend = true;
+        }
+
+        // QOS == 2 send PUBREC, recv PUBREL, send PUBCOMP
+        ack.header.byte = PUBREC_BYTE;
+        client->session.pool.register_key(pkt.pkt_id, packet_type::PUBREL);
+    }
+
+    if (!bQoS2Resend)
     {
         publish_msg(pkt);
 
-        // send reply to publisher if QOS == 1 or 2
-        // QOS == 1 send PUBACK response
-        if (pkt.header.bits.qos == AT_LEAST_ONCE)
-        {
-            ack.header.byte = PUBACK_BYTE;
-        }// QOS == 2 send PUBREC, recv PUBREL, send PUBCOMP
-        else if (pkt.header.bits.qos == EXACTLY_ONCE)
-        {
-            ack.header.byte = PUBREC_BYTE;
-            client->session.unregPubrel.emplace(uint16_t(pkt.pkt_id), 0);
-        }
-        else
+        if (pkt.header.bits.qos == AT_MOST_ONCE)
             return;
     }
-    else
-    {
-        // send pubrec again
-        ack.header.byte = PUBREC_BYTE;
-        ack.header.bits.dup = 1;
-        itpubrel->second = 1;
-    }
 
+    // send reply to publisher if QOS == 1 or 2
     tps::net::message<mqtt_header> reply;
+    ack.pkt_id = pkt.pkt_id;
     ack.pack(reply);
     client->netClient.get()->send(std::move(reply), this);
 }
 
-void server::disconnect(pClient &client, uint8_t flags, uint8_t manualControl)
+void server::disconnect(pClient& client, uint8_t flags, uint8_t manualControl)
 {
     mqtt_publish will;
-    bool pubWill = flags & PUBLISH_WILL && client->will;
+    bool bPubWill = (flags & PUBLISH_WILL) && client->will;
 
     if (flags & DISCONNECT)
         client->netClient.get()->disconnect(this);
 
-    if (pubWill)
+    if (bPubWill)
         will = std::move(*client->will);
 
     m_core.delete_client(client, manualControl);
 
-    if (pubWill)
+    if (bPubWill)
         publish_msg(will);
 }
 
-void server::handle_puback(pClient &client, mqtt_puback& pkt)
+void server::handle_puback(pClient& client, mqtt_puback& pkt)
 {
-    auto itpuback = client->session.unregPuback.find(pkt.pkt_id);
-    if (itpuback != client->session.unregPuback.end())
-        client->session.unregPuback.erase(itpuback);
+    auto val = client->session.pool.find(pkt.pkt_id);
+    if (val && val.value().get() == packet_type::PUBACK)
+        client->session.pool.unregister_key(pkt.pkt_id);
 }
 
 void server::handle_pubrec(pClient& client, mqtt_pubrec& pkt)
 {
-    auto itpubrec = client->session.unregPubrec.find(pkt.pkt_id);
-    if (itpubrec != client->session.unregPubrec.end())
+    if (auto val = client->session.pool.find(pkt.pkt_id))
     {
-        client->session.unregPubcomp.insert(pkt.pkt_id);
+        mqtt_pubrel pubrel(PUBREL_BYTE);
+        pubrel.pkt_id = pkt.pkt_id;
+
+        auto ackType = val.value().get();
+        if (ackType == packet_type::PUBREC)
+        {
+            client->session.pool.unregister_key(pkt.pkt_id);
+            client->session.pool.register_key(pkt.pkt_id, packet_type::PUBCOMP);
+
+        }
+        else if (ackType == packet_type::PUBCOMP)
+        {
+            // PUBREL that was sent earlier didn't get to the receiver - resend PUBREL
+            pubrel.header.bits.dup = 1;
+        }
 
         tps::net::message<mqtt_header> msg;
-        mqtt_pubrel pubrel(PUBREL_BYTE);
-        pubrel.header.bits.dup = itpubrec->second;
-        itpubrec->second = 1;
-        pubrel.pkt_id = pkt.pkt_id;
         pubrel.pack(msg);
         client->netClient.get()->send(std::move(msg), this);
     }
@@ -460,32 +452,28 @@ void server::handle_pubrec(pClient& client, mqtt_pubrec& pkt)
 
 void server::handle_pubrel(pClient& client, mqtt_pubrel& pkt)
 {
-    auto itpubrel = client->session.unregPubrel.find(pkt.pkt_id);
-    if (itpubrel != client->session.unregPubrel.end())
+    auto val = client->session.pool.find(pkt.pkt_id);
+    if (val && val.value().get() == packet_type::PUBREL)
     {
-//        client->session.unregPubrel.erase(itpubrel);
+        // [MQTT-4.3.3-2]
+        client->session.pool.unregister_key(pkt.pkt_id);
 
         tps::net::message<mqtt_header> msg;
         mqtt_pubcomp pubcomp(PUBCOMP_BYTE);
-        pubcomp.header.bits.dup = itpubrel->second;
-        itpubrel->second = 1;
         pubcomp.pkt_id = pkt.pkt_id;
         pubcomp.pack(msg);
         client->netClient.get()->send(std::move(msg), this);
     }
 }
 
-void server::handle_pubcomp(pClient &client, mqtt_pubcomp& pkt)
+void server::handle_pubcomp(pClient& client, mqtt_pubcomp& pkt)
 {
-    auto itpubcomp = client->session.unregPubcomp.find(pkt.pkt_id);
-    if (itpubcomp != client->session.unregPubcomp.end())
-    {
-        client->session.unregPubrec.erase(pkt.pkt_id);
-        client->session.unregPubcomp.erase(itpubcomp);
-    }
+    auto val = client->session.pool.find(pkt.pkt_id);
+    if (val && val.value().get() == packet_type::PUBCOMP)
+        client->session.pool.unregister_key(pkt.pkt_id);
 }
 
-void server::handle_pingreq(pClient &client)
+void server::handle_pingreq(pClient& client)
 {
     mqtt_pingresp pingresp(PINGRESP_BYTE);
     tps::net::message<mqtt_header> reply;

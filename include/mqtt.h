@@ -79,8 +79,8 @@ struct mqtt_packet
 
     static std::unique_ptr<mqtt_packet> create(tps::net::message<mqtt_header>& msg);
 
-    virtual void pack(tps::net::message<mqtt_header>&);
-    virtual void unpack(tps::net::message<mqtt_header>&);
+    virtual void pack(tps::net::message<mqtt_header>&) const;
+    virtual void unpack(const tps::net::message<mqtt_header>&);
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_packet& pkt);
 };
@@ -125,7 +125,7 @@ struct mqtt_connect: public mqtt_packet
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_connect& pkt);
 
-    void unpack(tps::net::message<mqtt_header>& msg) override;
+    void unpack(const tps::net::message<mqtt_header>& msg) override;
 };
 
 struct mqtt_connack: public mqtt_packet
@@ -148,7 +148,7 @@ struct mqtt_connack: public mqtt_packet
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_connack& pkt);
 
-    void pack(tps::net::message<mqtt_header> &msg) override;
+    void pack(tps::net::message<mqtt_header> &msg) const override;
 };
 
 struct mqtt_subscribe: public mqtt_packet
@@ -162,7 +162,7 @@ struct mqtt_subscribe: public mqtt_packet
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_subscribe& pkt);
 
-    void unpack(tps::net::message<mqtt_header>& msg) override;
+    void unpack(const tps::net::message<mqtt_header>& msg) override;
 };
 
 struct mqtt_unsubscribe: public mqtt_packet
@@ -176,7 +176,7 @@ struct mqtt_unsubscribe: public mqtt_packet
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_unsubscribe& pkt);
 
-    void unpack(tps::net::message<mqtt_header>& msg) override;
+    void unpack(const tps::net::message<mqtt_header>& msg) override;
 };
 
 struct mqtt_suback: public mqtt_packet
@@ -189,8 +189,8 @@ struct mqtt_suback: public mqtt_packet
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_suback& pkt);
 
-    void pack(tps::net::message<mqtt_header>& msg) override;
-    void unpack(tps::net::message<mqtt_header>& msg) override;
+    void pack(tps::net::message<mqtt_header>& msg) const override;
+    void unpack(const tps::net::message<mqtt_header>& msg) override;
 };
 
 struct mqtt_publish: public mqtt_packet
@@ -205,8 +205,8 @@ struct mqtt_publish: public mqtt_packet
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_publish& pkt);
 
-    void unpack(tps::net::message<mqtt_header>& msg) override;
-    void pack(tps::net::message<mqtt_header>& msg) override;
+    void pack(tps::net::message<mqtt_header>& msg) const override;
+    void unpack(const tps::net::message<mqtt_header>& msg) override;
 };
 
 struct mqtt_ack: public mqtt_packet
@@ -218,8 +218,8 @@ struct mqtt_ack: public mqtt_packet
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_ack& pkt);
 
-    void unpack(tps::net::message<mqtt_header>& msg) override;
-    void pack(tps::net::message<mqtt_header>& msg) override;
+    void pack(tps::net::message<mqtt_header>& msg) const override;
+    void unpack(const tps::net::message<mqtt_header>& msg) override;
 };
 
 typedef struct mqtt_ack mqtt_puback;

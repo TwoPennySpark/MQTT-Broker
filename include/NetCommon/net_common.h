@@ -6,7 +6,6 @@
 #include <vector>
 #include <thread>
 #include <memory>
-#include <utility>
 #include <chrono>
 
 #include <boost/asio.hpp>

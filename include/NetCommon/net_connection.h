@@ -55,13 +55,9 @@ namespace tps
                     asio::async_connect(m_socket, endpoints, [this](std::error_code ec, asio::ip::tcp::endpoint)
                     {
                         if (!ec)
-                        {
                             read_header(nullptr);
-                        }
                         else
-                        {
                             std::cout << "Failed to connect to server\n";
-                        }
                     });
                 }
             }
@@ -193,14 +189,11 @@ namespace tps
 
                             if (m_msgTempIn.hdr.size > 0)
                             {
-                                printf("HDR:%d SIZE:%d\n", m_msgTempIn.hdr.byte.byte, m_msgTempIn.hdr.size);
                                 m_msgTempIn.body.resize(m_msgTempIn.hdr.size);
                                 read_body(server);
                             }
                             else
-                            {
                                 add_to_incoming_message_queue(server);
-                            }
                         }
                         else
                         {
@@ -218,10 +211,7 @@ namespace tps
                     [this, server](const std::error_code& ec, std::size_t len)
                     {
                         if (!ec)
-                        {
-                            printf("READ BODY:%ld\n", len);
                             add_to_incoming_message_queue(server);
-                        }
                         else
                         {
                             std::cout << "[" << m_id << "] Read Body Fail\n";
@@ -234,15 +224,13 @@ namespace tps
             void write_header(server_interface<T>* server)
             {
                 asio::async_write(m_socket, asio::buffer(&m_qMessageOut.front().hdr,
-                                                         m_qMessageOut.front().writeHdrSize),
+                                                          m_qMessageOut.front().writeHdrSize),
                     [this, server](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
                             if (m_qMessageOut.front().body.size() > 0)
-                            {
                                 write_body(server);
-                            }
                             else
                             {
                                 m_qMessageOut.pop_front();
@@ -261,7 +249,8 @@ namespace tps
             // ASYNC
             void write_body(server_interface<T>* server)
             {
-                asio::async_write(m_socket, asio::buffer(m_qMessageOut.front().body.data(), m_qMessageOut.front().body.size()),
+                asio::async_write(m_socket, asio::buffer(m_qMessageOut.front().body.data(),
+                                                         m_qMessageOut.front().body.size()),
                     [this, server](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
@@ -308,9 +297,7 @@ namespace tps
                             else
                             {
                                 if (server->on_first_message(this->shared_from_this(), m_msgTempIn))
-                                {
                                     add_to_incoming_message_queue(server);
-                                }
                                 else
                                 {
                                     std::cout << "[" << m_id << "] Invalid First Msg Received\n";
@@ -340,9 +327,7 @@ namespace tps
                         if (!ec)
                         {
                             if (server->on_first_message(this->shared_from_this(), m_msgTempIn))
-                            {
                                 add_to_incoming_message_queue(server);
-                            }
                             else
                             {
                                 std::cout << "[" << m_id << "] Invalid First Msg Received\n";

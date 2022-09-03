@@ -45,8 +45,11 @@ uint16_t byteswap16(uint16_t x)
 std::ostream& operator<<(std::ostream& os, const mqtt_header& pkt)
 {
     os << "\t=================HEADER=================\n";
-    printf("\tTYPE:\t%d\t|\tQOS:\t%d\t|\n\tRETAIN:\t%d\t|\tDUP:\t%d\t|\n",
-           pkt.bits.type, pkt.bits.qos, pkt.bits.retain, pkt.bits.dup);
+    if (pkt.bits.type == uint8_t(packet_type::PUBLISH))
+        printf("\tQOS:\t%d\t|\n\tRETAIN:\t%d\t|\tDUP:\t%d\t|\n",
+               pkt.bits.qos, pkt.bits.retain, pkt.bits.dup);
+    else
+        printf("\tDUP:\t%d\t|\n", pkt.bits.dup);
     os << "\t==================BODY==================\n\n";
     return os;
 }
@@ -58,17 +61,17 @@ std::ostream& operator<<(std::ostream& os, const mqtt_packet& pkt)
     return os;
 }
 
-std::ostream& operator<<(std::ostream &os, const mqtt_connect &pkt)
+std::ostream& operator<<(std::ostream& os, const mqtt_connect& pkt)
 {
     os << pkt.header;
-    os << "\tCLIENT ID: \"" << pkt.payload.client_id << "\"" << std::endl;
+    os << "\tCLIENT ID: \"" << pkt.payload.clientID << "\"" << std::endl;
     os << "\tCLEAN SESSION: " << std::to_string(pkt.vhdr.bits.cleanSession) << std::endl;
     os << "\tKEEPALIVE: " << pkt.payload.keepalive << std::endl;
     if (pkt.vhdr.bits.will)
     {
-        os << "\tWILL TOPIC:" << "\"" << pkt.payload.will_topic << "\"" << std::endl;
-        os << "\tWILL MSG:" << "\"" << pkt.payload.will_message << "\"" << std::endl;
-        os << "\tWILL RETAIN:" << std::to_string(pkt.vhdr.bits.will_retain) << std::endl;
+        os << "\tWILL TOPIC:" << "\"" << pkt.payload.willTopic << "\"" << std::endl;
+        os << "\tWILL MSG:" << "\"" << pkt.payload.willMessage << "\"" << std::endl;
+        os << "\tWILL RETAIN:" << std::to_string(pkt.vhdr.bits.willRetain) << std::endl;
     }
     if (pkt.vhdr.bits.username)
         os << "\tUSERNAME:" << "\"" << pkt.payload.username << "\"" << std::endl;
@@ -78,19 +81,19 @@ std::ostream& operator<<(std::ostream &os, const mqtt_connect &pkt)
     return os;
 }
 
-std::ostream& operator<<(std::ostream &os, const mqtt_connack &pkt)
+std::ostream& operator<<(std::ostream& os, const mqtt_connack& pkt)
 {
     os << pkt.header;
-    printf("\tSP:\t%d\t|\tRC:\t%d\t|\n", pkt.sp.bits.session_present, pkt.rc);
+    printf("\tSP:\t%d\t|\tRC:\t%d\t|\n", pkt.sp.bits.sessionPresent, pkt.rc);
     os << "\t================END BODY================\n\n";
 
     return os;
 }
 
-std::ostream& operator<<(std::ostream &os, const mqtt_publish &pkt)
+std::ostream& operator<<(std::ostream& os, const mqtt_publish& pkt)
 {
     os << pkt.header;
-    os << "\tPKT ID: " << pkt.pkt_id << std::endl;
+    os << "\tPKT ID: " << pkt.pktID << std::endl;
     os << "\tTOPIC[" << pkt.topiclen << "]: " << "\"" << pkt.topic << "\"" << std::endl;
     os << "\tPAYLOAD[" << pkt.payload.size() << "]: " << "\"" << pkt.payload << "\"" << std::endl;
     os << "\t================END BODY================\n\n";
@@ -98,10 +101,10 @@ std::ostream& operator<<(std::ostream &os, const mqtt_publish &pkt)
     return os;
 }
 
-std::ostream& operator<<(std::ostream &os, const mqtt_subscribe &pkt)
+std::ostream& operator<<(std::ostream& os, const mqtt_subscribe& pkt)
 {
     os << pkt.header;
-    os << "\tPKT ID: " << pkt.pkt_id << std::endl;
+    os << "\tPKT ID: " << pkt.pktID << std::endl;
     for (auto& [topiclen, topic, qos]: pkt.tuples)
         os << "\tTOPIC[" << topiclen << "]: "
            << "\"" << topic << "\": " << std::to_string(qos) << std::endl;
@@ -110,10 +113,10 @@ std::ostream& operator<<(std::ostream &os, const mqtt_subscribe &pkt)
     return os;
 }
 
-std::ostream& operator<<(std::ostream &os, const mqtt_unsubscribe &pkt)
+std::ostream& operator<<(std::ostream& os, const mqtt_unsubscribe& pkt)
 {
     os << pkt.header;
-    os << "\tPKT ID: " << pkt.pkt_id << std::endl;
+    os << "\tPKT ID: " << pkt.pktID << std::endl;
     for (auto& [topiclen, topic]: pkt.tuples)
         os << "\tTOPIC[" << topiclen << "]: "
            << "\"" << topic << "\"" << std::endl;
@@ -125,7 +128,7 @@ std::ostream& operator<<(std::ostream &os, const mqtt_unsubscribe &pkt)
 std::ostream& operator<<(std::ostream& os, const mqtt_suback& pkt)
 {
     os << pkt.header;
-    os << "\tPKT ID: " << pkt.pkt_id << std::endl;
+    os << "\tPKT ID: " << pkt.pktID << std::endl;
     os << "\tRCS: ";
     for (auto rc: pkt.rcs)
         os << std::to_string(rc) << " ";
@@ -135,10 +138,10 @@ std::ostream& operator<<(std::ostream& os, const mqtt_suback& pkt)
     return os;
 }
 
-std::ostream& operator<<(std::ostream &os, const mqtt_ack &pkt)
+std::ostream& operator<<(std::ostream& os, const mqtt_ack& pkt)
 {
     os << pkt.header;
-    os << "\tPKT ID: " << pkt.pkt_id << std::endl;
+    os << "\tPKT ID: " << pkt.pktID << std::endl;
     os << "\t================END BODY================\n\n";
 
     return os;
@@ -195,9 +198,11 @@ std::unique_ptr<mqtt_packet> mqtt_packet::create(tps::net::message<mqtt_header>&
     return ret;
 }
 
-void mqtt_packet::unpack(const tps::net::message<mqtt_header> &msg)
+void mqtt_packet::unpack(const tps::net::message<mqtt_header>& msg)
 {
-
+    if (msg.hdr.byte.bits.type == uint8_t(packet_type::DISCONNECT) &&
+       (msg.hdr.byte.byte & 0xf) != 0) // [MQTT-3.14.1-1]
+        throw std::runtime_error("First 4 bits of the DISCONNECT header must be == 0");
 }
 
 void mqtt_connect::unpack(const tps::net::message<mqtt_header>& msg)
@@ -227,41 +232,41 @@ void mqtt_connect::unpack(const tps::net::message<mqtt_header>& msg)
     if (clientIDLength > MAX_CLIENT_ID_LEN)  // [MQTT-3.1.3-5]
         throw std::runtime_error("Client ID len must be less than 24 bytes");
 
-    payload.client_id.resize(clientIDLength);
-    msg >> payload.client_id;
+    payload.clientID.resize(clientIDLength);
+    msg >> payload.clientID;
 
     if (vhdr.bits.will)
     {
         uint16_t willTopicLen = 0;
         msg >> willTopicLen;
         willTopicLen = byteswap16(willTopicLen);
-        payload.will_topic.resize(willTopicLen);
-        msg >> payload.will_topic;
+        payload.willTopic.resize(willTopicLen);
+        msg >> payload.willTopic;
 
         uint16_t willMsgLen = 0;
         msg >> willMsgLen;
         willMsgLen = byteswap16(willMsgLen);
-        payload.will_message.resize(willMsgLen);
-        msg >> payload.will_message;
+        payload.willMessage.resize(willMsgLen);
+        msg >> payload.willMessage;
     }
-    else if (vhdr.bits.will_qos || vhdr.bits.will_retain) // [MQTT-3.1.2-13], [MQTT-3.1.2-15]
+    else if (vhdr.bits.willQoS || vhdr.bits.willRetain) // [MQTT-3.1.2-13], [MQTT-3.1.2-15]
         throw std::runtime_error("If the will flag == 0, then the will qos and retain must be == 0");
 
-    if (vhdr.bits.will_qos > EXACTLY_ONCE)
+    if (vhdr.bits.willQoS > EXACTLY_ONCE)
         throw std::runtime_error("the value of qos must not be == 3");
 
-    if (this->vhdr.bits.username)
+    if (vhdr.bits.username)
     {
         uint16_t usernameLen = 0;
         msg >> usernameLen;
         usernameLen = byteswap16(usernameLen);
-        this->payload.username.resize(usernameLen);
+        payload.username.resize(usernameLen);
         msg >> payload.username;
     }
 
-    if (this->vhdr.bits.password)
+    if (vhdr.bits.password)
     {
-        if (!this->vhdr.bits.username)
+        if (!vhdr.bits.username) // [MQTT-3.1.2-22]
             throw std::runtime_error("if the username flag == 0, the password flag must be == 0");
 
         uint16_t passwordLen = 0;
@@ -272,52 +277,54 @@ void mqtt_connect::unpack(const tps::net::message<mqtt_header>& msg)
     }
 }
 
-void mqtt_subscribe::unpack(const tps::net::message<mqtt_header> &msg)
+void mqtt_subscribe::unpack(const tps::net::message<mqtt_header>& msg)
 {
-    // [MQTT-3.8.1-1]
-    if (msg.hdr.byte.bits.qos != 1)
-        return;
+    if ((msg.hdr.byte.byte & 0xf) != 2) // [MQTT-3.8.1-1]
+         throw std::runtime_error("First 4 bits of the SUBSCRIBE header must be == 2");
 
-    msg >> pkt_id;
-    pkt_id = byteswap16(pkt_id);
+    msg >> pktID;
+    pktID = byteswap16(pktID);
 
-    uint32_t remainingBytes = msg.hdr.size - sizeof(pkt_id);
-
-    if (!remainingBytes) // [MQTT-3.8.3-3].
-        return;
+    uint32_t remainingBytes = msg.hdr.size - sizeof(pktID);
+    if (!remainingBytes) // [MQTT-3.8.3-3]
+        throw std::runtime_error("The payload of a SUBSCRIBE packet must "
+                                 "contain at least one topic filter / QoS pair");
 
     uint16_t count = 0;
     while (remainingBytes > 0)
     {
         tuples.resize(count+1);
-
         auto& [topiclen, topic, qos] = tuples[count];
 
         msg >> topiclen;
         topiclen = byteswap16(topiclen);
-
         if (!topiclen) // [MQTT-4.7.3-1]
-            return;
+            throw std::runtime_error("All topic filters must be at least one character long");
         remainingBytes -= sizeof(topiclen);
 
         topic.resize(topiclen);
         msg >> topic;
         msg >> qos;
-
-        if (qos > EXACTLY_ONCE)
-            return;
+        if (qos > EXACTLY_ONCE) // [MQTT-3-8.3-4]
+            throw std::runtime_error("QoS can't be more than 2");
 
         remainingBytes -= topiclen + sizeof(qos);
         count++;
     }
 }
 
-void mqtt_unsubscribe::unpack(const tps::net::message<mqtt_header> &msg)
+void mqtt_unsubscribe::unpack(const tps::net::message<mqtt_header>& msg)
 {
-    msg >> pkt_id;
-    pkt_id = byteswap16(pkt_id);
+    if ((msg.hdr.byte.byte & 0xf) != 2) // [MQTT-3.10.1-1]
+        throw std::runtime_error("First 4 bits of the UNSUBSCRIBE header must be == 2");
 
-    uint32_t remainingBytes = msg.hdr.size - sizeof(pkt_id);
+    msg >> pktID;
+    pktID = byteswap16(pktID);
+
+    uint32_t remainingBytes = msg.hdr.size - sizeof(pktID);
+    if (!remainingBytes) // [MQTT-3.10.3-2]
+        throw std::runtime_error("The payload of an UNSUBSCRIBE packet must "
+                                 "contain at least one topic filter / QoS pair");
 
     uint16_t count = 0;
     while (remainingBytes > 0)
@@ -327,6 +334,8 @@ void mqtt_unsubscribe::unpack(const tps::net::message<mqtt_header> &msg)
 
         msg >> topiclen;
         topiclen = byteswap16(topiclen);
+        if (!topiclen) // [MQTT-4.7.3-1]
+            throw std::runtime_error("All topic filters must be at least one character long");
         remainingBytes -= sizeof(topiclen);
 
         topic.resize(topiclen);
@@ -336,7 +345,7 @@ void mqtt_unsubscribe::unpack(const tps::net::message<mqtt_header> &msg)
     }
 }
 
-void mqtt_publish::unpack(const tps::net::message<mqtt_header> &msg)
+void mqtt_publish::unpack(const tps::net::message<mqtt_header>& msg)
 {
     msg >> topiclen;
     topiclen = byteswap16(topiclen);
@@ -344,35 +353,43 @@ void mqtt_publish::unpack(const tps::net::message<mqtt_header> &msg)
     topic.resize(topiclen);
     msg >> topic;
 
-    // the len of msg contained in publish packet = packet len - (len of topic size + topic itself) +
-    // + len of pkt id when qos level > 0
+    // the len of msg contained in publish packet =
+    // packet len - (len of topic size + topic itself) + len of pkt id when qos level > 0
     uint32_t payloadlen = msg.hdr.size - (sizeof(topiclen) + topiclen);
+
     // pkt id is a variable field
     if (header.bits.qos > AT_MOST_ONCE)
     {
-        msg >> pkt_id;
-        pkt_id = byteswap16(pkt_id);
-        payloadlen -= sizeof(pkt_id);
+        if (header.bits.qos == 3) // [MQTT-3.3.1-4]
+            throw std::runtime_error("Publish QoS == 3");
+
+        msg >> pktID;
+        pktID = byteswap16(pktID);
+        payloadlen -= sizeof(pktID);
     }
 
     payload.resize(payloadlen);
     msg >> payload;
 }
 
-void mqtt_suback::unpack(const tps::net::message<mqtt_header> &msg)
+void mqtt_suback::unpack(const tps::net::message<mqtt_header>& msg)
 {
-    msg >> pkt_id;
-    pkt_id = byteswap16(pkt_id);
+    msg >> pktID;
+    pktID = byteswap16(pktID);
 
-    uint16_t rcsBytes = msg.hdr.size - sizeof(pkt_id);
+    uint16_t rcsBytes = msg.hdr.size - sizeof(pktID);
     rcs.resize(rcsBytes);
     msg >> rcs;
 }
 
-void mqtt_ack::unpack(const tps::net::message<mqtt_header> &msg)
+void mqtt_ack::unpack(const tps::net::message<mqtt_header>& msg)
 {
-    msg >> pkt_id;
-    pkt_id = byteswap16(pkt_id);
+    if (msg.hdr.byte.bits.type == uint8_t(packet_type::PUBREL) &&
+       (msg.hdr.byte.byte & 0xf) != 2) // [MQTT-3.6.1-1]
+        throw std::runtime_error("First 4 bits of the PUBREL header must be == 2");
+
+    msg >> pktID;
+    pktID = byteswap16(pktID);
 }
 
 void mqtt_packet::pack(tps::net::message<mqtt_header>& msg) const
@@ -387,7 +404,7 @@ void mqtt_publish::pack(tps::net::message<mqtt_header>& msg) const
     uint32_t remainingLen = sizeof(topiclen) +
                             topiclen + payload.size();
     if (header.bits.qos > AT_MOST_ONCE)
-        remainingLen += sizeof(pkt_id);
+        remainingLen += sizeof(pktID);
     msg.writeHdrSize += mqtt_encode_length(msg, remainingLen);
 
     uint16_t topiclenbe = byteswap16(topiclen);
@@ -395,8 +412,8 @@ void mqtt_publish::pack(tps::net::message<mqtt_header>& msg) const
     msg << topic;
     if (header.bits.qos > AT_MOST_ONCE)
     {
-        uint16_t pkt_idbe = byteswap16(pkt_id);
-        msg << pkt_idbe;
+        uint16_t pktIDbe = byteswap16(pktID);
+        msg << pktIDbe;
     }
     msg << payload;
 }
@@ -413,18 +430,18 @@ void mqtt_connack::pack(tps::net::message<mqtt_header>& msg) const
 void mqtt_suback::pack(tps::net::message<mqtt_header>& msg) const
 {
     msg.hdr.byte = header.byte;
-    msg.writeHdrSize += mqtt_encode_length(msg, sizeof(pkt_id) + rcs.size());
+    msg.writeHdrSize += mqtt_encode_length(msg, sizeof(pktID) + rcs.size());
 
-    uint16_t pkt_idbe = byteswap16(pkt_id);
-    msg << pkt_idbe;
+    uint16_t pktIDbe = byteswap16(pktID);
+    msg << pktIDbe;
     msg << rcs;
 }
 
 void mqtt_ack::pack(tps::net::message<mqtt_header>& msg) const
 {
     msg.hdr.byte = header.byte;
-    msg.writeHdrSize += mqtt_encode_length(msg, sizeof(pkt_id));
+    msg.writeHdrSize += mqtt_encode_length(msg, sizeof(pktID));
 
-    uint16_t pkt_idbe = byteswap16(pkt_id);
-    msg << pkt_idbe;
+    uint16_t pktIDbe = byteswap16(pktID);
+    msg << pktIDbe;
 }

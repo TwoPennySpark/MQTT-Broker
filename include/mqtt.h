@@ -12,7 +12,7 @@
 #define PUBLISH_BYTE  0x30
 #define PUBACK_BYTE   0x40
 #define PUBREC_BYTE   0x50
-#define PUBREL_BYTE   0x60
+#define PUBREL_BYTE   0x62 // [MQTT-3.6.1-1]
 #define PUBCOMP_BYTE  0x70
 #define SUBACK_BYTE   0x90
 #define UNSUBACK_BYTE 0xB0
@@ -50,8 +50,6 @@ union mqtt_header
     uint8_t byte;
     struct hdr
     {
-        hdr() = default;
-        hdr(uint8_t _retain, uint8_t _qos, uint8_t _dup, uint8_t _type): retain(_retain), qos(_qos), dup(_dup), type(_type){}
         uint8_t retain : 1;
         uint8_t qos : 2;
         uint8_t dup : 1;
@@ -102,8 +100,8 @@ struct mqtt_connect: public mqtt_packet
             int8_t reserved : 1;
             uint8_t cleanSession : 1;
             uint8_t will : 1;
-            uint8_t will_qos : 2;
-            uint8_t will_retain : 1;
+            uint8_t willQoS : 2;
+            uint8_t willRetain : 1;
             uint8_t password : 1;
             uint8_t username : 1;
         } bits;
@@ -115,11 +113,11 @@ struct mqtt_connect: public mqtt_packet
         payload() = default;
         uint8_t protocolLevel;
         uint16_t keepalive;
-        std::string client_id;
+        std::string clientID;
         std::string username;
         std::string password;
-        std::string will_topic;
-        std::string will_message;
+        std::string willTopic;
+        std::string willMessage;
     };
     payload payload;
 
@@ -139,7 +137,7 @@ struct mqtt_connack: public mqtt_packet
         session(uint8_t _byte): byte(_byte){}
         uint8_t byte;
         struct {
-            uint8_t session_present : 1;
+            uint8_t sessionPresent : 1;
             uint8_t reserved : 7;
         } bits;
     };
@@ -148,7 +146,7 @@ struct mqtt_connack: public mqtt_packet
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_connack& pkt);
 
-    void pack(tps::net::message<mqtt_header> &msg) const override;
+    void pack(tps::net::message<mqtt_header>& msg) const override;
 };
 
 struct mqtt_subscribe: public mqtt_packet
@@ -156,7 +154,7 @@ struct mqtt_subscribe: public mqtt_packet
     mqtt_subscribe() = default;
     mqtt_subscribe(uint8_t _hdr): mqtt_packet (_hdr) {}
 
-    uint16_t pkt_id;
+    uint16_t pktID;
     // topiclen, topic, qos
     std::vector<std::tuple<uint16_t, std::string, uint8_t>> tuples;
 
@@ -170,8 +168,8 @@ struct mqtt_unsubscribe: public mqtt_packet
     mqtt_unsubscribe() = default;
     mqtt_unsubscribe(uint8_t _hdr): mqtt_packet (_hdr) {}
 
-    uint16_t pkt_id;
-    // topiclen, topic
+    uint16_t pktID;
+    // first - topiclen, second - topicfilter
     std::vector<std::pair<uint16_t, std::string>> tuples;
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_unsubscribe& pkt);
@@ -184,7 +182,7 @@ struct mqtt_suback: public mqtt_packet
     mqtt_suback(): mqtt_packet(SUBACK_BYTE) {}
     mqtt_suback(uint8_t _hdr): mqtt_packet (_hdr){}
 
-    uint16_t pkt_id;
+    uint16_t pktID;
     std::vector<uint8_t> rcs;
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_suback& pkt);
@@ -198,7 +196,7 @@ struct mqtt_publish: public mqtt_packet
     mqtt_publish(): mqtt_packet(PUBLISH_BYTE) {}
     mqtt_publish(uint8_t _hdr): mqtt_packet (_hdr) {}
 
-    uint16_t pkt_id;
+    uint16_t pktID;
     uint16_t topiclen;
     std::string topic;
     std::string payload;
@@ -214,7 +212,7 @@ struct mqtt_ack: public mqtt_packet
     mqtt_ack() = default;
     mqtt_ack(uint8_t _hdr): mqtt_packet (_hdr){}
 
-    uint16_t pkt_id;
+    uint16_t pktID;
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_ack& pkt);
 
@@ -231,8 +229,8 @@ typedef struct mqtt_packet mqtt_pingreq;
 typedef struct mqtt_packet mqtt_pingresp;
 typedef struct mqtt_packet mqtt_disconnect;
 
-uint8_t mqtt_encode_length(tps::net::message<mqtt_header> &msg, size_t len);
-uint32_t mqtt_decode_length(tps::net::message<mqtt_header> &msg);
+uint8_t mqtt_encode_length(tps::net::message<mqtt_header>& msg, size_t len);
+uint32_t mqtt_decode_length(tps::net::message<mqtt_header>& msg);
 
 uint16_t byteswap16(uint16_t x);
 

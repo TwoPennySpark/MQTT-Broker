@@ -44,7 +44,7 @@ pClient& core_t::add_new_client(std::string&& clientID, pConnection&& netClient)
     {
         do {clientID = generate_random_client_id();}
         while (clientsIDs.find(clientID) != clientsIDs.end());
-        std::cout << "GENERATED CLIENT ID:" << clientID << "\n";
+        std::cout << "GENERATED CLIENT ID:" << clientID << "\n\n";
     }
 
     auto newClient = std::make_shared<client_t>(clientID, netClient);
@@ -80,12 +80,9 @@ void core_t::delete_client(pClient& client, uint8_t manualControl)
         // delete all client's subscriptions
         for (auto it = client->session.subscriptions.begin(); it != client->session.subscriptions.end();)
         {
-//            std::string topicname = it->first;
             topic_t& topic = it->second;
             ++it;
             unsubscribe(*client, topic);
-//            if (client->unsubscribe(topic) && !topic.subscribers.size())
-//                topics.erase(topicname);
         }
 
         clientsIDs.erase(client->clientID);
@@ -136,26 +133,6 @@ void core_t::unsubscribe(client_t& client, topic_t& topic)
     if (!topic.subscribers.size())
         topics.erase(topic.name);
 }
-
-//void client::subscribe(topic_t &topic, uint8_t qos)
-//{
-//    // if client is already subscribed - update it's qos [MQTT-3.8.4-3]
-//    if (auto it = topic.subscribers.find(clientID); it != topic.subscribers.end())
-//        it->second.second = qos;
-//    else
-//        // add new client to the list of subs
-//        topic.subscribers.emplace(clientID, topic_t::subscriber(*this, qos));
-
-//    session.subscriptions.emplace(topic.name, topic);
-//}
-
-//bool client::unsubscribe(topic_t &topic)
-//{
-//    session.subscriptions.erase(topic.name);
-//    topic.subscribers.erase(clientID);
-
-//    return topic.subscribers.size();
-//}
 
 std::vector<std::shared_ptr<topic_t>> core_t::get_matching_topics(const std::string& topicFilter)
 {

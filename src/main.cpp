@@ -142,7 +142,7 @@ void test_pack_unpack()
         hdr.bits.type = uint8_t(packet_type::PUBLISH);
         std:: string topic = "topic", payload = "message";
         mqtt_publish pkt0(hdr.byte);
-        pkt0.pkt_id = 128; pkt0.topic = topic; pkt0.topiclen = topic.size(); pkt0.payload = payload;
+        pkt0.pktID = 128; pkt0.topic = topic; pkt0.topiclen = topic.size(); pkt0.payload = payload;
 
         tps::net::message<mqtt_header> msg;
         pkt0.pack(msg);
@@ -150,7 +150,7 @@ void test_pack_unpack()
         auto pkt1p = mqtt_packet::create(msg);
         mqtt_publish pkt1 = dynamic_cast<mqtt_publish&>(*pkt1p);
         assert(pkt0.header.byte == pkt1.header.byte);
-        assert(pkt0.pkt_id == pkt1.pkt_id);
+        assert(pkt0.pktID == pkt1.pktID);
         assert(pkt0.topiclen == pkt1.topiclen);
         assert(pkt0.topic == pkt1.topic);
         assert(pkt0.payload == pkt1.payload);
@@ -163,7 +163,7 @@ void test_pack_unpack()
         hdr.bits.type = uint8_t(packet_type::SUBACK);
         std::vector<uint8_t> rcs = {0, 255, 100, 1};
         mqtt_suback pkt0(hdr.byte);
-        pkt0.pkt_id = 65535; pkt0.rcs = rcs;
+        pkt0.pktID = 65535; pkt0.rcs = rcs;
 
         tps::net::message<mqtt_header> msg;
         pkt0.pack(msg);
@@ -172,7 +172,7 @@ void test_pack_unpack()
         mqtt_suback pkt1 = dynamic_cast<mqtt_suback&>(*pkt1p);
 
         assert(pkt0.header.byte == pkt1.header.byte);
-        assert(pkt0.pkt_id == pkt1.pkt_id);
+        assert(pkt0.pktID == pkt1.pktID);
         for (uint i = 0; i < pkt0.rcs.size(); i++)
             assert(pkt0.rcs[i] == pkt1.rcs[i]);
     }
@@ -183,7 +183,7 @@ void test_pack_unpack()
         hdr.bits.retain = 1; hdr.bits.qos = AT_MOST_ONCE; hdr.bits.dup = 0;
         hdr.bits.type = uint8_t(packet_type::PUBACK);
         mqtt_ack pkt0(hdr.byte);
-        pkt0.pkt_id = 10;
+        pkt0.pktID = 10;
 
         tps::net::message<mqtt_header> msg;
         pkt0.pack(msg);
@@ -192,7 +192,7 @@ void test_pack_unpack()
         mqtt_ack pkt1 = dynamic_cast<mqtt_ack&>(*pkt1p);
 
         assert(pkt0.header.byte == pkt1.header.byte);
-        assert(pkt0.pkt_id == pkt1.pkt_id);
+        assert(pkt0.pktID == pkt1.pktID);
     }
 }
 

@@ -35,7 +35,7 @@ struct KeyPool
         inline bool operator< (const chunk& rhs) const
         { return (start < rhs.start) ? true : false; }
 
-        friend std::ostream& operator<<(std::ostream &os, const chunk &c)
+        friend std::ostream& operator<<(std::ostream& os, const chunk &c)
         {
             os << "{";
             for (KeyType i = c.start; i < c.end; i++)

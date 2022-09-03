@@ -50,6 +50,7 @@ void server::on_message(pConnection netClient, tps::net::message<mqtt_header>& m
     if (!res)
         return;
     auto& client = res.value().get();
+    std::cout << client->clientID << ":";
 
     switch (type)
     {
@@ -118,14 +119,14 @@ void server::handle_connect(pConnection& netClient, mqtt_connect& pkt)
         connack.rc = 1; // [MQTT-3.1.2-2]
         goto reply;
     }
-    if (!pkt.vhdr.bits.cleanSession && !pkt.payload.client_id.size())
+    if (!pkt.vhdr.bits.cleanSession && !pkt.payload.clientID.size())
     {
         connack.rc = 2; // [MQTT-3.1.3-8]
         goto reply;
     }
 
     // check if client with same client ID already exists
-    if (auto res = m_core.find_client(pkt.payload.client_id))
+    if (auto res = m_core.find_client(pkt.payload.clientID))
     {
         auto& existingClient = res.value().get();
 
@@ -151,6 +152,7 @@ void server::handle_connect(pConnection& netClient, mqtt_connect& pkt)
         // client with same client ID had clean session bit == 0)
         if (!pkt.vhdr.bits.cleanSession)
         {
+            // restore session
             client = m_core.restore_client(existingClient, std::move(netClient));
             connack.sp.byte = 1;
         }
@@ -159,11 +161,11 @@ void server::handle_connect(pConnection& netClient, mqtt_connect& pkt)
             // delete stored session
             disconnect(existingClient, NONE, core_t::FULL_DELETION);
 
-            client = m_core.add_new_client(std::move(pkt.payload.client_id), std::move(netClient));
+            client = m_core.add_new_client(std::move(pkt.payload.clientID), std::move(netClient));
         }
     }
     else
-        client = m_core.add_new_client(std::move(pkt.payload.client_id), std::move(netClient));
+        client = m_core.add_new_client(std::move(pkt.payload.clientID), std::move(netClient));
 
     client->active = true;
 
@@ -172,11 +174,11 @@ void server::handle_connect(pConnection& netClient, mqtt_connect& pkt)
     if (pkt.vhdr.bits.will)
     {
         mqtt_publish willMsg;
-        willMsg.header.bits.qos = pkt.vhdr.bits.will_qos;
-        willMsg.header.bits.retain = pkt.vhdr.bits.will_retain;
-        willMsg.topic = std::move(pkt.payload.will_topic);
+        willMsg.header.bits.qos = pkt.vhdr.bits.willQoS;
+        willMsg.header.bits.retain = pkt.vhdr.bits.willRetain;
+        willMsg.topic = std::move(pkt.payload.willTopic);
         willMsg.topiclen = uint16_t(willMsg.topic.size());
-        willMsg.payload = std::move(pkt.payload.will_message);
+        willMsg.payload = std::move(pkt.payload.willMessage);
         client->will = std::move(willMsg);
     }
     if (pkt.vhdr.bits.username)
@@ -204,7 +206,7 @@ reply:
         for (auto& pkt : client->session.savedMsgs)
         {
             auto ackType = (pkt.header.bits.qos == AT_LEAST_ONCE) ? packet_type::PUBACK : packet_type::PUBREC;
-            pkt.pkt_id = client->session.pool.generate_key(ackType);
+            pkt.pktID = client->session.pool.generate_key(ackType);
 
             tps::net::message<mqtt_header> msg;
             pkt.pack(msg);
@@ -253,11 +255,11 @@ void server::handle_subscribe(pClient& client, mqtt_subscribe& pkt)
 
     // send SUBACK response
     tps::net::message<mqtt_header> reply;
-    suback.pkt_id = pkt.pkt_id;
+    suback.pktID = pkt.pktID;
     suback.pack(reply);
     client->netClient.get()->send(std::move(reply), this);
 
-    // send retained msgs
+    // send retained msgs [MQTT-3.3.1-6]
     for (auto& msg: retainedMsgs)
         client->netClient.get()->send(std::move(msg), this);
 }
@@ -284,7 +286,7 @@ void server::handle_unsubscribe(pClient& client, mqtt_unsubscribe& pkt)
     // send UNSUBACK response
     mqtt_unsuback unsuback(UNSUBACK_BYTE);
     tps::net::message<mqtt_header> reply;
-    unsuback.pkt_id = pkt.pkt_id;
+    unsuback.pktID = pkt.pktID;
     unsuback.pack(reply);
     client->netClient.get()->send(std::move(reply), this);
 }
@@ -313,14 +315,17 @@ void server::publish_msg(mqtt_publish& pkt)
         pkt.header.bits.retain = 0; // [MQTT-3.3.1-9]
     }
 
-    pkt.header.bits.dup = 0;
+    pkt.header.bits.dup = 0; // [MQTT-3.3.1-3]
+
+    auto originalPktID = pkt.pktID;
+    auto originalQoS = pkt.header.bits.qos;
 
     // prepare version with qos == 0 beforehand, since it doesn't need pkt ID
     tps::net::message<mqtt_header> pubmsgQoS0;
-    pubmsgQoS0.hdr.byte.bits.qos = AT_MOST_ONCE;
+    pkt.header.bits.qos = AT_MOST_ONCE;
     pkt.pack(pubmsgQoS0);
 
-    auto originalPktID = pkt.pkt_id;
+    pkt.header.bits.qos = originalQoS;
 
     // send published msg to subscribers
     for (auto& sub: topic->get().subscribers)
@@ -340,7 +345,7 @@ void server::publish_msg(mqtt_publish& pkt)
             {
                 // assign pkt ID
                 auto ackType = (qos == AT_LEAST_ONCE) ? packet_type::PUBACK : packet_type::PUBREC;
-                pkt.pkt_id = subClient.session.pool.generate_key(ackType);
+                pkt.pktID = subClient.session.pool.generate_key(ackType);
 
                 pkt.pack(temp);
 
@@ -358,7 +363,7 @@ void server::publish_msg(mqtt_publish& pkt)
             }
         }
     }
-    pkt.pkt_id = originalPktID;
+    pkt.pktID = originalPktID;
 }
 
 void server::handle_publish(pClient& client, mqtt_publish& pkt)
@@ -370,7 +375,7 @@ void server::handle_publish(pClient& client, mqtt_publish& pkt)
     bool bQoS2Resend = false;
     if (pkt.header.bits.qos == EXACTLY_ONCE)
     {
-        auto pubrel = client->session.pool.find(pkt.pkt_id);
+        auto pubrel = client->session.pool.find(pkt.pktID);
         if (pubrel && pubrel.value().get() == packet_type::PUBREL)
         {
             // send pubrec again
@@ -382,7 +387,7 @@ void server::handle_publish(pClient& client, mqtt_publish& pkt)
 
         // QOS == 2 send PUBREC, recv PUBREL, send PUBCOMP
         ack.header.byte = PUBREC_BYTE;
-        client->session.pool.register_key(pkt.pkt_id, packet_type::PUBREL);
+        client->session.pool.register_key(pkt.pktID, packet_type::PUBREL);
     }
 
     if (!bQoS2Resend)
@@ -395,7 +400,7 @@ void server::handle_publish(pClient& client, mqtt_publish& pkt)
 
     // send reply to publisher if QOS == 1 or 2
     tps::net::message<mqtt_header> reply;
-    ack.pkt_id = pkt.pkt_id;
+    ack.pktID = pkt.pktID;
     ack.pack(reply);
     client->netClient.get()->send(std::move(reply), this);
 }
@@ -419,30 +424,27 @@ void server::disconnect(pClient& client, uint8_t flags, uint8_t manualControl)
 
 void server::handle_puback(pClient& client, mqtt_puback& pkt)
 {
-    auto val = client->session.pool.find(pkt.pkt_id);
+    auto val = client->session.pool.find(pkt.pktID);
     if (val && val.value().get() == packet_type::PUBACK)
-        client->session.pool.unregister_key(pkt.pkt_id);
+        client->session.pool.unregister_key(pkt.pktID);
 }
 
 void server::handle_pubrec(pClient& client, mqtt_pubrec& pkt)
 {
-    if (auto val = client->session.pool.find(pkt.pkt_id))
+    if (auto val = client->session.pool.find(pkt.pktID))
     {
         mqtt_pubrel pubrel(PUBREL_BYTE);
-        pubrel.pkt_id = pkt.pkt_id;
+        pubrel.pktID = pkt.pktID;
 
-        auto ackType = val.value().get();
-        if (ackType == packet_type::PUBREC)
+        auto expectedAckType = val.value().get();
+        if (expectedAckType == packet_type::PUBREC)
         {
-            client->session.pool.unregister_key(pkt.pkt_id);
-            client->session.pool.register_key(pkt.pkt_id, packet_type::PUBCOMP);
-
+            client->session.pool.unregister_key(pkt.pktID);
+            client->session.pool.register_key(pkt.pktID, packet_type::PUBCOMP);
         }
-        else if (ackType == packet_type::PUBCOMP)
-        {
-            // PUBREL that was sent earlier didn't get to the receiver - resend PUBREL
+        else if (expectedAckType == packet_type::PUBCOMP)
+            // PUBREL was sent earlier but didn't get to the receiver - resend PUBREL
             pubrel.header.bits.dup = 1;
-        }
 
         tps::net::message<mqtt_header> msg;
         pubrel.pack(msg);
@@ -452,15 +454,15 @@ void server::handle_pubrec(pClient& client, mqtt_pubrec& pkt)
 
 void server::handle_pubrel(pClient& client, mqtt_pubrel& pkt)
 {
-    auto val = client->session.pool.find(pkt.pkt_id);
+    auto val = client->session.pool.find(pkt.pktID);
     if (val && val.value().get() == packet_type::PUBREL)
     {
         // [MQTT-4.3.3-2]
-        client->session.pool.unregister_key(pkt.pkt_id);
+        client->session.pool.unregister_key(pkt.pktID);
 
         tps::net::message<mqtt_header> msg;
         mqtt_pubcomp pubcomp(PUBCOMP_BYTE);
-        pubcomp.pkt_id = pkt.pkt_id;
+        pubcomp.pktID = pkt.pktID;
         pubcomp.pack(msg);
         client->netClient.get()->send(std::move(msg), this);
     }
@@ -468,9 +470,9 @@ void server::handle_pubrel(pClient& client, mqtt_pubrel& pkt)
 
 void server::handle_pubcomp(pClient& client, mqtt_pubcomp& pkt)
 {
-    auto val = client->session.pool.find(pkt.pkt_id);
+    auto val = client->session.pool.find(pkt.pktID);
     if (val && val.value().get() == packet_type::PUBCOMP)
-        client->session.pool.unregister_key(pkt.pkt_id);
+        client->session.pool.unregister_key(pkt.pktID);
 }
 
 void server::handle_pingreq(pClient& client)

@@ -59,7 +59,7 @@ namespace tps
                 {
                     if (!ec)
                     {
-                        std::cout << "[SERVER] New connection: " << socket.remote_endpoint() << std::endl;
+//                        std::cout << "[SERVER] New connection: " << socket.remote_endpoint() << std::endl;
                         std::shared_ptr<connection<T>> newconn = std::make_shared<connection<T>>(
                                     connection<T>::owner::server, m_asioContext, std::move(socket), m_qMessagesIn);
 

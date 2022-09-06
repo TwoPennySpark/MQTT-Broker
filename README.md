@@ -8,6 +8,7 @@ Using c++17 and boost asio v1.79.0
 ## Build & Run:  
 ```
 git clone https://github.com/TwoPennySpark/MQTT-Broker.git  
+cd MQTT-Broker/  
 mkdir build  
 cd build/  
 cmake ..  

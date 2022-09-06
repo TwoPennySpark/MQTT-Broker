@@ -14,12 +14,10 @@
 // key-value w/o explicitly specifing key, instead it searches for the first avaliable
 // key in range [std::numeric_limits<KeyType>::min(), std::numeric_limits<KeyType>::max()]
 // inserted keys are grouped in chunks for faster search of first unused key
-template <typename KeyType, typename ValueType>
+template <typename KeyType, typename ValueType,
+          typename = typename std::enable_if_t<std::is_integral_v<KeyType>>>
 struct KeyPool
 {
-    typedef KeyType keytype;
-    typedef KeyType valuetype;
-
     struct chunk
     {
         KeyType start;
@@ -77,6 +75,8 @@ struct KeyPool
             values.pop_back();
         }
 
+        // move all data from the next chunk to this one (next.start == this.end+1)
+        // [this.start, this.end] + [next.start, next.end] = [this.start, next.end]
         void merge(const chunk &next) const
         {
             end = next.end;
@@ -84,16 +84,20 @@ struct KeyPool
                 values.emplace_back(std::move(value));
         }
 
-        void split(KeyPool::chunk &next, KeyType splitPoint) const
+        // split this chunk in two (start < splitPoint < end)
+        // [start, end] = [start, splitPoint), (splitPoint, end]
+        chunk split(KeyType splitPoint) const
         {
-            next.start = splitPoint+1;
-            next.end = end;
-            end = splitPoint-1;
-            KeyType index = splitPoint - start;
+            chunk next(splitPoint+1, end);
 
+            end = splitPoint-1;
+
+            KeyType index = splitPoint - start;
             for (KeyType i = index+1; i < values.size(); i++)
                 next.values.emplace_back(std::move(values[i]));
             values.erase(std::next(values.begin(), index), values.end());
+
+            return next;
         }
     };
 
@@ -116,14 +120,14 @@ struct KeyPool
             return std::numeric_limits<KeyType>::min();
         }
 
-        // get first avaliable id
+        // get first avaliable keyy
         auto it = chunks.begin();
         if (it->end == std::numeric_limits<KeyType>::max())
             throw std::runtime_error("Out of keys");
         it->push_back(value);
-        KeyType id = it->end;
+        KeyType key = it->end;
 
-        // if new id connects first chunk to the second - merge them
+        // if new key connects first chunk to the second - merge them
         if (chunks.size() > 1)
         {
             auto itnext = std::next(chunks.begin(), 1);
@@ -133,28 +137,29 @@ struct KeyPool
                 chunks.erase(itnext);
             }
         }
-        return id;
+        return key;
     }
 
-    bool register_key(KeyType id, const ValueType& value)
+    bool register_key(KeyType key, const ValueType& value)
     {
-        // find first chunk with start >= id
-        auto it = chunks.lower_bound(id);
+        // find first chunk with start >= key
+        auto it = chunks.lower_bound(key);
         if (it != chunks.end())
         {
-            // id already taken
-            if (id == it->start)
+            // key already taken
+            if (key == it->start)
                 return false;
-            else if (id == it->start-1)
+            // key is right before start of a chunk
+            else if (key == it->start-1)
             {
                 if (it != chunks.begin())
                 {
                     auto itCopy = it;
                     it--;
-                    // id connects two chunks - merge them
-                    if (it->end+1 == id)
+                    // key connects two chunks - merge them
+                    if (it->end+1 == key)
                     {
-                        // add id to existing chunk
+                        // add key to existing chunk
                         it->push_back(value);
 
                         it->merge(*itCopy);
@@ -176,51 +181,51 @@ struct KeyPool
         if (it != chunks.begin())
         {
             it--;
-            if (it->end >= id) // already taken
+            // key already taken
+            if (it->end >= key)
                 return false;
-            else if (it->end+1 == id)
+            else if (it->end+1 == key)
             {
-                // add id to existing chunk
+                // add key to existing chunk
                 it->push_back(value);
                 return true;
             }
         }
 
         // create new chunk
-        chunk temp(id, id);
+        chunk temp(key, key);
         temp.values.push_back(value);
         chunks.emplace(std::move(temp));
 
         return true;
     }
 
-    bool unregister_key(KeyType id)
+    bool unregister_key(KeyType key)
     {
-        // points to chunk with start >= id
-        auto it = chunks.lower_bound(id);
-        if (it != chunks.end() && id == it->start)
+        // points to chunk with start >= key
+        auto it = chunks.lower_bound(key);
+        if (it != chunks.end() && key == it->start)
         {
-            if (auto t = it->pop_front())
-                chunks.insert(t.value());
+            if (auto temp = it->pop_front())
+                chunks.insert(temp.value());
             chunks.erase(it);
 
             return true;
         }
 
-        // if there is a chunk with start < id
+        // if there is a chunk with start < key
         if (it != chunks.begin())
         {
             it--;
-            if (it->end == id)
+            if (it->end == key)
             {
                 it->pop_back();
                 return true;
             }
-            else if (it->end > id)
+            else if (it->end > key)
             {
                 // split chunk in two
-                chunk next(id, id);
-                it->split(next, id);
+                auto next = it->split(key);
                 chunks.insert(next);
                 return true;
             }
@@ -229,19 +234,19 @@ struct KeyPool
         return false;
     }
 
-    std::optional<std::reference_wrapper<ValueType>> find(KeyType id)
+    std::optional<std::reference_wrapper<ValueType>> find(KeyType key)
     {
-        // points to chunk with start >= id
-        auto it = chunks.lower_bound(id);
+        // points to chunk with start >= key
+        auto it = chunks.lower_bound(key);
         if (it != chunks.end())
-            if (it->start == id)
+            if (it->start == key)
                 return it->values.front();
 
         if (it != chunks.begin())
         {
             it--;
-            if (it->end >= id)
-                return it->values[id-it->start];
+            if (it->end >= key)
+                return it->values[key-it->start];
         }
 
         return std::nullopt;

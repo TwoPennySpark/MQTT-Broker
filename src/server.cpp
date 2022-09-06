@@ -205,8 +205,9 @@ reply:
     {
         for (auto& pkt : client->session.savedMsgs)
         {
-            auto ackType = (pkt.header.bits.qos == AT_LEAST_ONCE) ? packet_type::PUBACK : packet_type::PUBREC;
-            pkt.pktID = client->session.pool.generate_key(ackType);
+            auto expectedAckType = (pkt.header.bits.qos == AT_LEAST_ONCE) ?
+                                    packet_type::PUBACK : packet_type::PUBREC;
+            pkt.pktID = client->session.pool.generate_key(expectedAckType);
 
             tps::net::message<mqtt_header> msg;
             pkt.pack(msg);
@@ -333,7 +334,7 @@ void server::publish_msg(mqtt_publish& pkt)
         auto& subClient = sub.second.first;
 
         // determine QoS level based on published msg QoS and client's
-        // max QoS level specified in SUBSCRIBE packet
+        // max QoS level specified in SUBSCRIBE packet [MQTT-3.8.4-6]
         auto qos = std::min(sub.second.second, pkt.header.bits.qos);
 
         if (subClient.active)
@@ -343,9 +344,10 @@ void server::publish_msg(mqtt_publish& pkt)
                 temp = pubmsgQoS0;
             else
             {
+                auto expectedAckType = (qos == AT_LEAST_ONCE) ?
+                                        packet_type::PUBACK : packet_type::PUBREC;
                 // assign pkt ID
-                auto ackType = (qos == AT_LEAST_ONCE) ? packet_type::PUBACK : packet_type::PUBREC;
-                pkt.pktID = subClient.session.pool.generate_key(ackType);
+                pkt.pktID = subClient.session.pool.generate_key(expectedAckType);
 
                 pkt.pack(temp);
 

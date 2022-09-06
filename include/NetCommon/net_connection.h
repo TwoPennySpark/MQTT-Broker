@@ -31,7 +31,7 @@ namespace tps
 
             ~connection()
             {
-                std::cout << "[!]CONNECTION DELETED: "<< m_id << "\n";
+//                std::cout << "[!]CONNECTION DELETED: "<< m_id << "\n";
             }
 
             void connect_to_client(uint32_t uid, server_interface<T>* server)
@@ -98,7 +98,6 @@ namespace tps
                 {
                     m_socket.shutdown(asio::ip::tcp::socket::shutdown_both);
                     m_socket.close();
-                    std::cout << "SOCKET CLOSE\n";
                     if (m_nOwnerType == owner::server)
                     {
                         server->on_client_disconnect(this->shared_from_this());
@@ -197,7 +196,7 @@ namespace tps
                         }
                         else
                         {
-                            std::cout << "[" << m_id << "] Read First Header Fail: " <<
+                            std::cout << "[" << m_id << "] Read Header Fail: " <<
                                     (bValidRemainingField ? ec.message() : "Invalid remaining length") << "\n";
                             shutdown_cleanup(server);
                         }

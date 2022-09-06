@@ -770,6 +770,26 @@ void test_idpool_reg3()
     assert(p.find(1000).value() == type);
 }
 
+void test_idpool_reg4()
+{ // test push_fornt
+    KeyPool<uint16_t, packet_type> p;
+    auto type = packet_type::PUBACK;
+
+    for (uint16_t i = 5; i < 10; i++)
+        p.register_key(i, type);
+
+    // {5, 6, 7, 8, 9}
+
+    for (uint16_t i = 4; i > 0; i--)
+        p.register_key(i, type);
+
+    // {1, 2, 3, 4, 5, 6, 7, 8, 9}
+
+    auto it = p.chunks.begin();
+    assert(p.chunks.size() == 1);
+    assert(it->start == 1 && it->end == 9 && it->values.size() == 9);
+}
+
 void test_idpool_unreg1()
 { // test unreg on empty
     KeyPool<uint16_t, packet_type> p;
@@ -804,6 +824,8 @@ void test_idpool_unreg2()
     assert(it->start == 8 && it->end == 8 && it->values.size() == 1);
     assert(p.find(3).value() == type);
     assert(p.find(8).value() == type);
+    assert(!p.find(2));assert(!p.find(4));
+    assert(!p.find(7));assert(!p.find(9));
 }
 
 void test_idpool_unreg3()
@@ -873,6 +895,7 @@ void test_idpool()
     test_idpool_reg1();
     test_idpool_reg2();
     test_idpool_reg3();
+    test_idpool_reg4();
     test_idpool_unreg1();
     test_idpool_unreg2();
     test_idpool_unreg3();
@@ -891,7 +914,6 @@ void test()
 
 int main()
 {
-//    test();
     std::cout << "[" << std::this_thread::get_id() << "]MAIN THREAD\n";
 
     server broker(5000);

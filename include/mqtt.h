@@ -155,7 +155,7 @@ struct mqtt_subscribe: public mqtt_packet
     mqtt_subscribe(uint8_t _hdr): mqtt_packet (_hdr) {}
 
     uint16_t pktID;
-    // topiclen, topic, qos
+    // first - topiclen, second - topicfilter, third - qos
     std::vector<std::tuple<uint16_t, std::string, uint8_t>> tuples;
 
     friend std::ostream& operator<< (std::ostream& os, const mqtt_subscribe& pkt);

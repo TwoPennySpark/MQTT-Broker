@@ -153,7 +153,7 @@ void server::handle_connect(pConnection& netClient, mqtt_connect& pkt)
         if (!pkt.vhdr.bits.cleanSession)
         {
             // restore session
-            client = m_core.restore_client(existingClient, std::move(netClient));
+            client = m_core.restore_client(existingClient, netClient);
             connack.sp.byte = 1;
         }
         else
@@ -161,11 +161,11 @@ void server::handle_connect(pConnection& netClient, mqtt_connect& pkt)
             // delete stored session
             disconnect(existingClient, NONE, core_t::FULL_DELETION);
 
-            client = m_core.add_new_client(std::move(pkt.payload.clientID), std::move(netClient));
+            client = m_core.add_new_client(std::move(pkt.payload.clientID), netClient);
         }
     }
     else
-        client = m_core.add_new_client(std::move(pkt.payload.clientID), std::move(netClient));
+        client = m_core.add_new_client(std::move(pkt.payload.clientID), netClient);
 
     client->active = true;
 
@@ -191,12 +191,12 @@ reply:
     // send CONNACK response
     tps::net::message<mqtt_header> reply;
     connack.pack(reply);
-    client->netClient.get()->send(std::move(reply), this);
+    netClient->send(std::move(reply));
 
     if (connack.rc)
     {
         // [MQTT-3.2.2-4], [MQTT-3.2.2-5]
-        netClient->disconnect(this);
+        netClient->disconnect();
         return;
     }
 
@@ -211,7 +211,7 @@ reply:
 
             tps::net::message<mqtt_header> msg;
             pkt.pack(msg);
-            client->netClient.get()->send(std::move(msg), this);
+            client->netClient.get()->send(std::move(msg));
         }
         client->session.savedMsgs.clear();
     }
@@ -258,11 +258,11 @@ void server::handle_subscribe(pClient& client, mqtt_subscribe& pkt)
     tps::net::message<mqtt_header> reply;
     suback.pktID = pkt.pktID;
     suback.pack(reply);
-    client->netClient.get()->send(std::move(reply), this);
+    client->netClient.get()->send(std::move(reply));
 
     // send retained msgs [MQTT-3.3.1-6]
     for (auto& msg: retainedMsgs)
-        client->netClient.get()->send(std::move(msg), this);
+        client->netClient.get()->send(std::move(msg));
 }
 
 void server::handle_unsubscribe(pClient& client, mqtt_unsubscribe& pkt)
@@ -289,7 +289,7 @@ void server::handle_unsubscribe(pClient& client, mqtt_unsubscribe& pkt)
     tps::net::message<mqtt_header> reply;
     unsuback.pktID = pkt.pktID;
     unsuback.pack(reply);
-    client->netClient.get()->send(std::move(reply), this);
+    client->netClient.get()->send(std::move(reply));
 }
 
 void server::publish_msg(mqtt_publish& pkt)
@@ -353,7 +353,7 @@ void server::publish_msg(mqtt_publish& pkt)
 
                 temp.hdr.byte.bits.qos = qos;
             }
-            subClient.netClient.get()->send(std::move(temp), this);
+            subClient.netClient.get()->send(std::move(temp));
         }
         else
         {
@@ -404,7 +404,7 @@ void server::handle_publish(pClient& client, mqtt_publish& pkt)
     tps::net::message<mqtt_header> reply;
     ack.pktID = pkt.pktID;
     ack.pack(reply);
-    client->netClient.get()->send(std::move(reply), this);
+    client->netClient.get()->send(std::move(reply));
 }
 
 void server::disconnect(pClient& client, uint8_t flags, uint8_t manualControl)
@@ -413,7 +413,7 @@ void server::disconnect(pClient& client, uint8_t flags, uint8_t manualControl)
     bool bPubWill = (flags & PUBLISH_WILL) && client->will;
 
     if (flags & DISCONNECT)
-        client->netClient.get()->disconnect(this);
+        client->netClient.get()->disconnect();
 
     if (bPubWill)
         will = std::move(*client->will);
@@ -450,7 +450,7 @@ void server::handle_pubrec(pClient& client, mqtt_pubrec& pkt)
 
         tps::net::message<mqtt_header> msg;
         pubrel.pack(msg);
-        client->netClient.get()->send(std::move(msg), this);
+        client->netClient.get()->send(std::move(msg));
     }
 }
 
@@ -466,7 +466,7 @@ void server::handle_pubrel(pClient& client, mqtt_pubrel& pkt)
         mqtt_pubcomp pubcomp(PUBCOMP_BYTE);
         pubcomp.pktID = pkt.pktID;
         pubcomp.pack(msg);
-        client->netClient.get()->send(std::move(msg), this);
+        client->netClient.get()->send(std::move(msg));
     }
 }
 
@@ -483,6 +483,6 @@ void server::handle_pingreq(pClient& client)
     tps::net::message<mqtt_header> reply;
 
     pingresp.pack(reply);
-    client->netClient.get()->send(std::move(reply), this);
+    client->netClient.get()->send(std::move(reply));
 }
 

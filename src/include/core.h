@@ -84,8 +84,8 @@ public:
     // client struct can be found either by clientID or client's corresponding connection object
     std::optional<std::reference_wrapper<pClient>> find_client(
         const std::variant<pConnection, std::reference_wrapper<std::string>>& key);
-    pClient& add_new_client  (std::string &&clientID,  pConnection&& netClient);
-    pClient& restore_client  (pClient& existingClient, pConnection&& netClient);
+    pClient& add_new_client  (std::string &&clientID,  pConnection& netClient);
+    pClient& restore_client  (pClient& existingClient, pConnection& netClient);
 
     // usually deletion type depends on client::session::cleanSession param
     // but in some special cases caller needs to specify explicitly

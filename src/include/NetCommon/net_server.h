@@ -61,13 +61,13 @@ namespace tps
                     {
 //                        std::cout << "[SERVER] New connection: " << socket.remote_endpoint() << std::endl;
                         std::shared_ptr<connection<T>> newconn = std::make_shared<connection<T>>(
-                                    connection<T>::owner::server, m_asioContext, std::move(socket), m_qMessagesIn);
+                                    connection<T>::owner::server, this, m_asioContext, std::move(socket), m_qMessagesIn);
 
                         if (on_client_connect(newconn))
                         {
                             m_deqConnections.push_back(std::move(newconn));
 
-                            m_deqConnections.back()->connect_to_client(nIDCounter++, this);
+                            m_deqConnections.back()->connect_to_client(m_nIDCounter++);
 
                             std::cout << "[" << m_deqConnections.back()->get_ID() << "] Connection approved\n";
                         }
@@ -88,7 +88,7 @@ namespace tps
             template <typename Type>
             void message_client(std::shared_ptr<connection<T>>& client, Type&& msg)
             {
-                client->send(std::forward<Type>(msg), this);
+                client->send(std::forward<Type>(msg));
             }
 
             void message_all_clients(const message<T>& msg, std::shared_ptr<connection<T>> pIgnoreClient = nullptr)
@@ -96,7 +96,7 @@ namespace tps
                 for (auto& client: m_deqConnections)
                 {
                     if (client != pIgnoreClient)
-                        client->send(msg, this);
+                        client->send(msg);
                 }
             }
 
@@ -125,7 +125,6 @@ namespace tps
                 return true;
             }
 
-
             virtual void on_message(std::shared_ptr<connection<T>>, message<T>&)
             {
 
@@ -152,7 +151,7 @@ namespace tps
 
             std::deque<std::shared_ptr<connection<T>>> m_deqConnections;
 
-            uint32_t nIDCounter = 10000;
+            uint32_t m_nIDCounter = 10000;
         };
     }
 }

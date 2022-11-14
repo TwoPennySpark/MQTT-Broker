@@ -4,6 +4,8 @@
 #include "net_common.h"
 #include "net_message.h"
 #include "net_tsqueue.h"
+#include "net_connection.h"
+#include "net_server.h"
 
 namespace tps
 {
@@ -32,7 +34,7 @@ namespace tps
                     asio::ip::tcp::resolver resolver(m_context);
                     asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(host, std::to_string(port));
 
-                    m_connection = std::make_unique<connection<T>>(connection<T>::owner::client, m_context,
+                    m_connection = std::make_unique<connection<T>>(connection<T>::owner::client, nullptr, m_context,
                                                                    asio::ip::tcp::socket(m_context), m_qMessageIn);
 
                     m_connection->connect_to_server(endpoints);
@@ -48,10 +50,7 @@ namespace tps
 
             void disconnect()
             {
-                if (is_connected())
-                {
-                    m_connection->disconnect();
-                }
+                m_connection->disconnect();
 
                 m_context.stop();
                 if (thrContext.joinable())
@@ -62,17 +61,13 @@ namespace tps
 
             bool is_connected()
             {
-                if (m_connection->is_connected())
-                    return true;
-                else
-                    return false;
+                return (m_connection->is_connected()) ? true : false;
             }
 
             template <typename Type>
             void send(Type&& msg)
             {
-                if (is_connected())
-                    m_connection->send(std::forward<Type>(msg), nullptr);
+                m_connection->send(std::forward<Type>(msg));
             }
 
             tsqueue<owned_message<T>>& incoming()

@@ -38,7 +38,7 @@ std::string generate_random_client_id()
     return str;
 }
 
-pClient& core_t::add_new_client(std::string&& clientID, pConnection&& netClient)
+pClient& core_t::add_new_client(std::string&& clientID, pConnection& netClient)
 {
     if (!clientID.size()) // [MQTT-3.1.3-6]
     {
@@ -50,16 +50,16 @@ pClient& core_t::add_new_client(std::string&& clientID, pConnection&& netClient)
     auto newClient = std::make_shared<client_t>(clientID, netClient);
 
     clientsIDs.emplace(std::move(clientID), newClient);
-    auto res = clients.emplace(std::move(netClient), std::move(newClient));
+    auto res = clients.emplace(netClient, std::move(newClient));
     // store reference to the key inside value
     res.first->second->netClient = res.first->first;
 
     return res.first->second;
 }
 
-pClient& core_t::restore_client(pClient& existingClient, pConnection&& netClient)
+pClient& core_t::restore_client(pClient& existingClient, pConnection& netClient)
 {
-    auto res = clients.emplace(std::move(netClient), existingClient);
+    auto res = clients.emplace(netClient, existingClient);
     // store reference to the key inside value
     existingClient->netClient = res.first->first;
 

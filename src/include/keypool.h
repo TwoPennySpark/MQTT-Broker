@@ -120,7 +120,7 @@ struct KeyPool
             return std::numeric_limits<KeyType>::min();
         }
 
-        // get first avaliable keyy
+        // get first avaliable key
         auto it = chunks.begin();
         if (it->end == std::numeric_limits<KeyType>::max())
             throw std::runtime_error("Out of keys");

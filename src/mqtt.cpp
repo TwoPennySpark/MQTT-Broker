@@ -192,20 +192,21 @@ std::unique_ptr<mqtt_packet> mqtt_packet::create(tps::net::message<mqtt_header>&
         ret = nullptr;
     }
 
-    if (msg.data_left_to_pop())
+    // there should't be anything left after unpacking
+    if (msg.is_data_left())
         ret = nullptr;
 
     return ret;
 }
 
-void mqtt_packet::unpack(const tps::net::message<mqtt_header>& msg)
+void mqtt_packet::unpack(tps::net::message<mqtt_header>& msg)
 {
     if (msg.hdr.byte.bits.type == uint8_t(packet_type::DISCONNECT) &&
        (msg.hdr.byte.byte & 0xf) != 0) // [MQTT-3.14.1-1]
         throw std::runtime_error("First 4 bits of the DISCONNECT header must be == 0");
 }
 
-void mqtt_connect::unpack(const tps::net::message<mqtt_header>& msg)
+void mqtt_connect::unpack(tps::net::message<mqtt_header>& msg)
 {
     uint16_t protocolLen = 0;
     msg >> protocolLen;
@@ -277,7 +278,7 @@ void mqtt_connect::unpack(const tps::net::message<mqtt_header>& msg)
     }
 }
 
-void mqtt_subscribe::unpack(const tps::net::message<mqtt_header>& msg)
+void mqtt_subscribe::unpack(tps::net::message<mqtt_header>& msg)
 {
     if ((msg.hdr.byte.byte & 0xf) != 2) // [MQTT-3.8.1-1]
          throw std::runtime_error("First 4 bits of the SUBSCRIBE header must be == 2");
@@ -313,7 +314,7 @@ void mqtt_subscribe::unpack(const tps::net::message<mqtt_header>& msg)
     }
 }
 
-void mqtt_unsubscribe::unpack(const tps::net::message<mqtt_header>& msg)
+void mqtt_unsubscribe::unpack(tps::net::message<mqtt_header>& msg)
 {
     if ((msg.hdr.byte.byte & 0xf) != 2) // [MQTT-3.10.1-1]
         throw std::runtime_error("First 4 bits of the UNSUBSCRIBE header must be == 2");
@@ -345,7 +346,7 @@ void mqtt_unsubscribe::unpack(const tps::net::message<mqtt_header>& msg)
     }
 }
 
-void mqtt_publish::unpack(const tps::net::message<mqtt_header>& msg)
+void mqtt_publish::unpack(tps::net::message<mqtt_header>& msg)
 {
     msg >> topiclen;
     topiclen = byteswap16(topiclen);
@@ -372,7 +373,7 @@ void mqtt_publish::unpack(const tps::net::message<mqtt_header>& msg)
     msg >> payload;
 }
 
-void mqtt_suback::unpack(const tps::net::message<mqtt_header>& msg)
+void mqtt_suback::unpack(tps::net::message<mqtt_header>& msg)
 {
     msg >> pktID;
     pktID = byteswap16(pktID);
@@ -382,7 +383,7 @@ void mqtt_suback::unpack(const tps::net::message<mqtt_header>& msg)
     msg >> rcs;
 }
 
-void mqtt_ack::unpack(const tps::net::message<mqtt_header>& msg)
+void mqtt_ack::unpack(tps::net::message<mqtt_header>& msg)
 {
     if (msg.hdr.byte.bits.type == uint8_t(packet_type::PUBREL) &&
        (msg.hdr.byte.byte & 0xf) != 2) // [MQTT-3.6.1-1]

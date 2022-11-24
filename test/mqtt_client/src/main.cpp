@@ -10,7 +10,11 @@ tps::net::message<mqtt_header> get_msg(std::unique_ptr<MQTTClient>& client)
 auto create_client()
 {
     auto client = std::make_unique<MQTTClient>();
-    client->connect("192.168.1.64", 1883);
+    auto fut = client->connect("127.0.0.1", 1883);
+    try {fut.get();} catch (const std::exception& e) {
+        std::cout << e.what() << "\n";
+        exit(0);
+    }
 
     return client;
 }
@@ -44,7 +48,7 @@ void test_connect()
     { // connect with NO ID and NO clean session - violation[MQTT-3.1.3-8]
         std::cout << "#3\n";
     auto client = create_client();
-    client->connect_server("", CLEAN_SESSION_TRUE);
+    client->connect_server("", CLEAN_SESSION_FALSE);
     auto msg = get_msg(client);
     auto connack = client->unpack_connack(msg);
 
@@ -52,14 +56,13 @@ void test_connect()
     assert(connack.sp.byte == 0);
     assert(connack.rc == 2);
 
-    client->disconnect();
-    usleep(1000*500);
+    client->send_disconnect();
     }
 
     { // connect with ID and NO clean session without previous session
         std::cout << "#4\n";
     auto client = create_client();
-    client->connect_server("client0", CLEAN_SESSION_TRUE);
+    client->connect_server("client0", CLEAN_SESSION_FALSE);
     auto msg = get_msg(client);
     auto connack = client->unpack_connack(msg);
 
@@ -67,8 +70,7 @@ void test_connect()
     assert(connack.sp.byte == 0);
     assert(connack.rc == 0);
 
-    client->disconnect();
-    usleep(1000*500);
+    client->send_disconnect();
     }
 
     { // connect with ID and NO clean session with previous session
@@ -86,12 +88,11 @@ void test_connect()
     assert(connack0.rc == 0);
 
     // disconnect
-    client0->disconnect();
-    usleep(1000*500);
+    client0->send_disconnect();
 
     // connect again to create new session
     auto client1 = create_client();
-    client0->connect_server("client1", CLEAN_SESSION_TRUE);
+    client1->connect_server("client1", CLEAN_SESSION_FALSE);
     auto msg1 = get_msg(client1);
     auto connack1 = client1->unpack_connack(msg1);
 
@@ -100,12 +101,11 @@ void test_connect()
     assert(connack1.rc == 0);
 
     // disconnect - session should be stored
-    client1->disconnect();
-    usleep(1000*500);
+    client1->send_disconnect();
 
     // connect again with same id to restore session
     auto client2 = create_client();
-    client0->connect_server("client1", CLEAN_SESSION_TRUE);
+    client2->connect_server("client1", CLEAN_SESSION_FALSE);
     auto msg2 = get_msg(client2);
     auto connack2 = client2->unpack_connack(msg2);
 
@@ -113,8 +113,7 @@ void test_connect()
     assert(connack2.sp.byte == 1);
     assert(connack2.rc == 0);
 
-    client2->disconnect();
-    usleep(1000*500);
+    client2->send_disconnect();
     }
 }
 
@@ -343,20 +342,20 @@ void test_publish()
     get_msg(client1); // get CONNACK
 
     // send PUB
-    std::string msg = "msg_example";
-    auto pktID1 = client1->publish(topic, msg, EXACTLY_ONCE);
+    std::string msg1 = "msg_example";
+    auto pktID1 = client1->publish(topic, msg1, EXACTLY_ONCE);
 
     // recv PUBREC
-    auto msg1 = get_msg(client1);
-    auto ack1 = client1->unpack_ack(msg1);
+    auto msg12 = get_msg(client1);
+    auto ack1 = client1->unpack_ack(msg12);
     assert(ack1.header.bits.type == uint8_t(packet_type::PUBREC));
     assert(ack1.pktID == pktID1);
 
     client1->send_ack(packet_type::PUBREL, ack1.pktID); // send PUBREL
 
     // recv PUBCOMP
-    auto msg12 = get_msg(client1);
-    auto ack12 = client1->unpack_ack(msg1);
+    auto msg13 = get_msg(client1);
+    auto ack12 = client1->unpack_ack(msg13);
     assert(ack12.header.bits.type == uint8_t(packet_type::PUBCOMP));
     assert(ack12.pktID == pktID1);
 
@@ -365,13 +364,13 @@ void test_publish()
     auto pub = client0->unpack_publish(msg01);
     assert(pub.header.bits.qos == EXACTLY_ONCE);
     assert(pub.topic == topic);
-    assert(pub.payload == msg);
+    assert(pub.payload == msg1);
 
-    client0->send_ack(packet_type::PUBREL, ack1.pktID); // send PUBREC
+    client0->send_ack(packet_type::PUBREC, ack1.pktID); // send PUBREC
 
     // recv PUBREL
     auto msg02 = get_msg(client0);
-    auto ack01 = client1->unpack_ack(msg1);
+    auto ack01 = client1->unpack_ack(msg02);
     assert(ack01.header.bits.type == uint8_t(packet_type::PUBREL));
     assert(ack01.pktID == pub.pktID);
     }

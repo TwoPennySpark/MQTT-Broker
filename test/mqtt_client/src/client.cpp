@@ -236,7 +236,7 @@ void MQTTClient::unsubscribe()
     this->send(std::move(msg));
 }
 
-void MQTTClient::disconnect()
+void MQTTClient::send_disconnect()
 {
     mqtt_disconnect disc(DISC_BYTE);
     tps::net::message<mqtt_header> msg;
@@ -249,6 +249,8 @@ void MQTTClient::send_ack(packet_type type, uint16_t pktID)
     tps::net::message<mqtt_header> msg;
     mqtt_ack ack;
     ack.header.bits.type = uint8_t(type);
+    if (type == packet_type::PUBREL) // [MQTT-3.6.1-1]
+        ack.header.bits.qos = 1;
     ack.pktID = pktID;
     ack.pack(msg);
     send(std::move(msg));

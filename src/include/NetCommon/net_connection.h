@@ -1,7 +1,6 @@
 #ifndef NET_CONNECTION_H
 #define NET_CONNECTION_H
 
-#include "net_common.h"
 #include "net_message.h"
 #include "net_tsqueue.h"
 
@@ -24,51 +23,61 @@ namespace tps
             };
 
             connection(owner parent, server_interface<T>* _server, asio::io_context& asioContext, asio::ip::tcp::socket socket, tsqueue<owned_message<T>>& qIn):
-                       m_socket(std::move(socket)), m_asioContext(asioContext), m_qMessageIn(qIn), m_nOwnerType(parent), m_server(_server)
+                       m_socket(std::move(socket)), m_asioContext(asioContext), m_qMessageIn(qIn), m_nOwnerType(parent), m_server(_server), m_writeStrand(asioContext)
             {
 
             }
 
             ~connection()
             {
-//                std::cout << "[!]CONNECTION DELETED: "<< m_id << "\n";
+                std::cout << "[!]CONNECTION DELETED: "<< m_id << "\n";
             }
 
             void connect_to_client(uint32_t uid)
             {
-                if (m_nOwnerType == owner::server)
+                if (is_connected())
                 {
-                    if (m_socket.is_open())
-                    {
-                        m_id = uid;
+                    m_id = uid;
 
-                        read_first_hdr();
-                    }
+                    read_first_hdr();
                 }
             }
 
             // ASYNC
-            void connect_to_server(const asio::ip::tcp::resolver::results_type& endpoints)
+            void connect_to_server(const asio::ip::tcp::resolver::results_type& endpoints, std::promise<bool>& connectPromise)
             {
-                if (m_nOwnerType == owner::client)
+                asio::async_connect(m_socket, endpoints, [this, connectPromise = std::move(connectPromise)]
+                (std::error_code ec, asio::ip::tcp::endpoint) mutable
                 {
-                    asio::async_connect(m_socket, endpoints, [this](std::error_code ec, asio::ip::tcp::endpoint)
+                    if (!ec)
                     {
-                        if (!ec)
-                            read_header();
-                        else
-                        {
-                            std::cout << "[-]Failed to connect to server\n";
-                            disconnect();
-                        }
-                    });
-                }
+                        connectPromise.set_value(true);
+                        read_header();
+                    }
+                    else
+                        connectPromise.set_exception(std::make_exception_ptr(std::runtime_error("[-]Failed to connect to server\n")));
+                });
             }
 
             // ASYNC
             void disconnect()
             {
-                asio::post(m_asioContext, [this]() { shutdown_cleanup(); });
+                asio::post(m_asioContext, [me = this->shared_from_this()]
+                {
+                    if (me->is_connected())
+                    {
+                        // no point in notifying the server about the connection it itself closed
+                        if (me->m_nOwnerType == owner::server)
+                            me->bNotifyServer = false;
+                        me->m_socket.cancel();
+                    }
+                });
+            }
+
+            void notify_server()
+            {
+                if (m_nOwnerType == owner::server && bNotifyServer)
+                    m_server->on_client_disconnect(this->shared_from_this());
             }
 
             bool is_connected() const
@@ -84,34 +93,19 @@ namespace tps
             void set_timer(uint32_t mls)
             {
                 m_timer = std::make_pair<asio::deadline_timer, uint32_t>
-                        (asio::deadline_timer(m_asioContext, posix_time::millisec(mls)), uint32_t(mls));
-            }
-
-            void shutdown_cleanup(bool bNotify = true)
-            {
-                if (is_connected())
-                {
-                    m_socket.shutdown(asio::ip::tcp::socket::shutdown_both);
-                    m_socket.close();
-                    if (m_nOwnerType == owner::server)
-                    {
-                        if (bNotify)
-                            m_server->on_client_disconnect(this->shared_from_this());
-                        m_server->delete_client(this->shared_from_this());
-                    }
-                }
+                    (asio::deadline_timer(m_asioContext, posix_time::millisec(mls)), uint32_t(mls));
             }
 
             // ASYNC
             template <typename Type>
             void send(Type&& msg)
             {
-                asio::post(m_asioContext, [this, msg = std::forward<Type>(msg)]() mutable
+                asio::post(m_asioContext, [me = this->shared_from_this(), msg = std::forward<Type>(msg)]() mutable
                 {
-                    bool bWritingMessage = !m_qMessageOut.empty();
-                    m_qMessageOut.push_back(std::forward<Type>(msg));
+                    bool bWritingMessage = !me->m_qMessageOut.empty();
+                    me->m_qMessageOut.push_back(std::forward<Type>(msg));
                     if (!bWritingMessage)
-                        write_header();
+                        me->write_header();
                 });
             }
 
@@ -173,28 +167,28 @@ namespace tps
                     });
 
                 asio::async_read(m_socket, asio::buffer(&m_msgTempIn.hdr, sizeof(m_msgTempIn.hdr)+1), decode_len(m_msgTempIn),
-                    [this](const std::error_code& ec, std::size_t)
+                    [me = this->shared_from_this()](const std::error_code& ec, std::size_t)
                     {
-                        bool bValidRemainingField = (m_msgTempIn.hdr.size !=
-                            std::numeric_limits<decltype(m_msgTempIn.hdr.size)>::max());
+                        bool bValidRemainingField = (me->m_msgTempIn.hdr.size !=
+                            std::numeric_limits<decltype(me->m_msgTempIn.hdr.size)>::max());
                         if (!ec && bValidRemainingField)
                         {
-                            if (m_timer)
-                                m_timer->first.expires_from_now(boost::posix_time::millisec(m_timer->second));
+                            if (me->m_timer)
+                                me->m_timer->first.expires_from_now(boost::posix_time::millisec(me->m_timer->second));
 
-                            if (m_msgTempIn.hdr.size > 0)
+                            if (me->m_msgTempIn.hdr.size > 0)
                             {
-                                m_msgTempIn.body.resize(m_msgTempIn.hdr.size);
-                                read_body();
+                                me->m_msgTempIn.body.resize(me->m_msgTempIn.hdr.size);
+                                me->read_body();
                             }
                             else
-                                add_to_incoming_message_queue();
+                                me->add_to_incoming_message_queue();
                         }
                         else
                         {
-                            std::cout << "[" << m_id << "] Read Header Fail: " <<
+                            std::cout << "[" << me->m_id << "] Read Header Fail: " <<
                                     (bValidRemainingField ? ec.message() : "Invalid remaining length") << "\n";
-                            shutdown_cleanup();
+                            me->notify_server();
                         }
                     });
             }
@@ -203,14 +197,14 @@ namespace tps
             void read_body()
             {
                 asio::async_read(m_socket, asio::buffer(m_msgTempIn.body.data(), m_msgTempIn.body.size()),
-                    [this](const std::error_code& ec, std::size_t)
+                    [me = this->shared_from_this()](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
-                            add_to_incoming_message_queue();
+                            me->add_to_incoming_message_queue();
                         else
                         {
-                            std::cout << "[" << m_id << "] Read Body Fail\n";
-                            shutdown_cleanup();
+                            std::cout << "[" << me->m_id << "] Read Body Fail\n";
+                            me->notify_server();
                         }
                     });
             }
@@ -220,25 +214,25 @@ namespace tps
             {
                 asio::async_write(m_socket, asio::buffer(&m_qMessageOut.front().hdr,
                                                           m_qMessageOut.front().writeHdrSize),
-                    [this](const std::error_code& ec, std::size_t)
+                    m_writeStrand.wrap([me = this->shared_from_this()](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
-                            if (m_qMessageOut.front().body.size() > 0)
-                                write_body();
+                            if (me->m_qMessageOut.front().body.size() > 0)
+                                me->write_body();
                             else
                             {
-                                m_qMessageOut.pop_front();
-                                if (!m_qMessageOut.empty())
-                                    write_header();
+                                me->m_qMessageOut.pop_front();
+                                if (!me->m_qMessageOut.empty())
+                                    me->write_header();
                             }
                         }
                         else
                         {
-                            std::cout << "[" << m_id << "] Write Header Fail: " << ec.message() << "\n";
-                            shutdown_cleanup();
+                            std::cout << "[" << me->m_id << "] Write Header Fail: " << ec.message() << "\n";
+                            me->notify_server();
                         }
-                    });
+                    }));
             }
 
             // ASYNC
@@ -246,20 +240,20 @@ namespace tps
             {
                 asio::async_write(m_socket, asio::buffer(m_qMessageOut.front().body.data(),
                                                          m_qMessageOut.front().body.size()),
-                    [this](const std::error_code& ec, std::size_t)
+                    m_writeStrand.wrap([me = this->shared_from_this()](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
-                                m_qMessageOut.pop_front();
-                                if (!m_qMessageOut.empty())
-                                    write_header();
+                                me->m_qMessageOut.pop_front();
+                                if (!me->m_qMessageOut.empty())
+                                    me->write_header();
                         }
                         else
                         {
-                            std::cout << "[" << m_id << "] Write Body Fail\n";
-                            shutdown_cleanup();
+                            std::cout << "[" << me->m_id << "] Write Body Fail\n";
+                            me->notify_server();
                         }
-                    });
+                    }));
             }
 
             void add_to_incoming_message_queue()
@@ -278,33 +272,29 @@ namespace tps
             void read_first_hdr()
             {
                 asio::async_read(m_socket, asio::buffer(&m_msgTempIn.hdr, sizeof(m_msgTempIn.hdr)+1), decode_len(m_msgTempIn),
-                    [this](const std::error_code& ec, std::size_t)
+                    [me = this->shared_from_this()] (const std::error_code& ec, std::size_t)
                     {
-                        bool bValidRemainingField = (m_msgTempIn.hdr.size !=
-                                std::numeric_limits<decltype(m_msgTempIn.hdr.size)>::max());
+                        bool bValidRemainingField = (me->m_msgTempIn.hdr.size !=
+                                std::numeric_limits<decltype(me->m_msgTempIn.hdr.size)>::max());
                         if (!ec && bValidRemainingField)
                         {
-                            if (m_msgTempIn.hdr.size > 0)
+                            if (me->m_msgTempIn.hdr.size > 0)
                             {
-                                m_msgTempIn.body.resize(m_msgTempIn.hdr.size);
-                                read_first_body();
+                                me->m_msgTempIn.body.resize(me->m_msgTempIn.hdr.size);
+                                me->read_first_body();
                             }
                             else
                             {
-                                if (m_server->on_first_message(this->shared_from_this(), m_msgTempIn))
-                                    add_to_incoming_message_queue();
+                                if (me->m_server->on_first_message(me->shared_from_this(), me->m_msgTempIn))
+                                    me->add_to_incoming_message_queue();
                                 else
-                                {
-                                    std::cout << "[" << m_id << "] Invalid First Msg Received\n";
-                                    shutdown_cleanup(false);
-                                }
+                                    std::cout << "[" << me->m_id << "] Invalid First Msg Received\n";
                             }
                         }
                         else
                         {
-                            std::cout << "[" << m_id << "] Read First Header Fail: " <<
+                            std::cout << "[" << me->m_id << "] Read First Header Fail: " <<
                                     (bValidRemainingField ? ec.message() : "Invalid remaining length") << "\n";
-                            shutdown_cleanup(false);
                         }
                     });
             }
@@ -313,23 +303,17 @@ namespace tps
             void read_first_body()
             {
                 asio::async_read(m_socket, asio::buffer(m_msgTempIn.body.data(), m_msgTempIn.body.size()),
-                    [this](const std::error_code& ec, std::size_t)
+                    [me = this->shared_from_this()](const std::error_code& ec, std::size_t)
                     {
                         if (!ec)
                         {
-                            if (m_server->on_first_message(this->shared_from_this(), m_msgTempIn))
-                                add_to_incoming_message_queue();
+                            if (me->m_server->on_first_message(me, me->m_msgTempIn))
+                                me->add_to_incoming_message_queue();
                             else
-                            {
-                                std::cout << "[" << m_id << "] Invalid First Msg Received\n";
-                                shutdown_cleanup(false);
-                            }
+                                std::cout << "[" << me->m_id << "] Invalid First Msg Received\n";
                         }
                         else
-                        {
-                            std::cout << "[" << m_id << "] Read First Body Fail\n";
-                            shutdown_cleanup(false);
-                        }
+                            std::cout << "[" << me->m_id << "] Read First Body Fail\n";
                     });
             }
 
@@ -337,20 +321,20 @@ namespace tps
             asio::ip::tcp::socket m_socket;
 
             asio::io_context& m_asioContext;
+            asio::io_service::strand m_writeStrand;
 
             tsqueue<message<T>> m_qMessageOut;
 
+            message<T> m_msgTempIn;
             tsqueue<owned_message<T>>& m_qMessageIn;
 
-            message<T> m_msgTempIn;
-
+            std::atomic<bool> bNotifyServer = true;
+            server_interface<T>* m_server;
             owner m_nOwnerType = owner::server;
 
             uint32_t m_id = 0;
 
             std::optional<std::pair<asio::deadline_timer, uint32_t>> m_timer;
-			
-            server_interface<T>* m_server;
         };
     }
 }

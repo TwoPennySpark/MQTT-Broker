@@ -153,6 +153,8 @@ void server::handle_connect(pConnection& netClient, mqtt_connect& pkt)
         if (!pkt.vhdr.bits.cleanSession)
         {
             // restore session
+
+            std::cout <<"==========RESTORE=============\n";
             client = m_core.restore_client(existingClient, netClient);
             connack.sp.byte = 1;
         }

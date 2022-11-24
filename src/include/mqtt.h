@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <vector>
+#include <string>
 
 /*
  * Stub bytes, useful for generic replies, these represent the first byte in
@@ -44,7 +45,7 @@ namespace tps::net {template <typename T> struct message;}
 
 union mqtt_header
 {
-    mqtt_header() = default;
+    mqtt_header(): byte(0) {}
     mqtt_header(uint8_t _byte): byte(_byte) {}
 
     uint8_t byte;
